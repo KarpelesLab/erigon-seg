@@ -75,6 +75,6 @@ pub use reader::{KvIter, KvReader};
 pub use salt::{Salt, salt_from_file};
 pub use seg::{Getter, OpenOptions, Seg};
 pub use writer::{
-    BtLayout, BtOptions, DEFAULT_BTREE_M, KveiBuilder, SegWriter, build_bt, build_bt_from_seg,
-    build_kvei_from_seg,
+    BtLayout, BtOptions, DEFAULT_BTREE_M, DomainOptions, DomainPaths, DomainWriter, KveiBuilder,
+    SegWriter, build_bt, build_bt_from_seg, build_kvei_from_seg,
 };

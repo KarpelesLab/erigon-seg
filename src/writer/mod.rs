@@ -6,12 +6,14 @@
 
 mod bitwriter;
 mod bt_writer;
+mod domain;
 mod ef_builder;
 mod huffman;
 mod kvei_writer;
 mod seg_writer;
 
 pub use bt_writer::{BtLayout, BtOptions, DEFAULT_BTREE_M, build_bt, build_bt_from_seg};
+pub use domain::{DomainOptions, DomainPaths, DomainWriter};
 pub use kvei_writer::{KveiBuilder, build_kvei_from_seg};
 pub use seg_writer::SegWriter;
 
@@ -135,6 +137,42 @@ mod tests {
         assert_eq!(r.find_salt(8), Some(salt));
 
         for p in [&kv, &bt, &kvei] {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+
+    #[test]
+    fn domain_writer_full_triple() {
+        use crate::{DomainOptions, DomainWriter, KvReader, Salt};
+        let salt = 777u32;
+        let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..3000u32)
+            .map(|i| (format!("k{i:09}").into_bytes(), format!("v{i}").into_bytes()))
+            .collect();
+        let kv = scratch("domain").with_extension("kv");
+        let mut w = DomainWriter::create(&kv, DomainOptions { salt: Some(salt), ..Default::default() }).unwrap();
+        for (k, v) in &pairs {
+            w.add(k, v).unwrap();
+        }
+        let paths = w.finish().unwrap();
+        assert!(paths.bt.exists() && paths.kvei.as_ref().unwrap().exists());
+
+        let mut r = KvReader::open(&kv).unwrap();
+        assert_eq!(r.key_count(), pairs.len() as u64);
+        assert!(r.enable_bloom(Salt::Known(salt)));
+        for (k, v) in &pairs {
+            assert_eq!(r.get(k).unwrap().as_deref(), Some(v.as_slice()));
+        }
+        assert!(r.get(b"k999999999").unwrap().is_none());
+
+        // Out-of-order keys are rejected.
+        let kv2 = scratch("domain2").with_extension("kv");
+        let mut w2 = DomainWriter::create(&kv2, DomainOptions::default()).unwrap();
+        w2.add(b"b", b"1").unwrap();
+        assert!(w2.add(b"a", b"2").is_err());
+        assert!(w2.add(b"b", b"2").is_err()); // duplicate also rejected
+        drop(w2);
+
+        for p in [&paths.kv, &paths.bt, paths.kvei.as_ref().unwrap(), &kv2] {
             let _ = std::fs::remove_file(p);
         }
     }
