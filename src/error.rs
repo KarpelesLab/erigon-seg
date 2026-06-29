@@ -8,6 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Anything that can go wrong while opening or reading a seg file set.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// An underlying I/O failure (open, stat, mmap), annotated with the path.
     Io {

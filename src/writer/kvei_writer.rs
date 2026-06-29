@@ -119,7 +119,13 @@ impl KveiBuilder {
     }
 }
 
-/// Build a `.kvei` for every key in a `.kv`, hashing with `salt`.
+/// Build a `.kvei` existence filter for a `.kv` file, writing it to `out_path`.
+pub fn build_kvei(kv_path: impl AsRef<Path>, salt: u32, out_path: impl AsRef<Path>) -> Result<()> {
+    let seg = crate::seg::Seg::open(kv_path)?;
+    build_kvei_from_seg(&seg, salt, out_path)
+}
+
+/// Build a `.kvei` for every key in an already-open [`Seg`](crate::Seg), hashing with `salt`.
 pub fn build_kvei_from_seg(
     seg: &crate::seg::Seg,
     salt: u32,

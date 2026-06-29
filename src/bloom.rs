@@ -26,6 +26,7 @@ const BLOOM_BITS_OFFSET: usize = 60;
 
 /// What kind of filter a `.kvei` turned out to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FilterKind {
     /// An empty (0-byte) filter: matches every key.
     Empty,

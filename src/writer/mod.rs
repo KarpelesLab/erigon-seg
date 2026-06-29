@@ -16,7 +16,7 @@ mod seg_writer;
 
 pub use bt_writer::{BtLayout, BtOptions, DEFAULT_BTREE_M, build_bt, build_bt_from_seg};
 pub use domain::{DomainOptions, DomainPaths, DomainWriter};
-pub use kvei_writer::{KveiBuilder, build_kvei_from_seg};
+pub use kvei_writer::{KveiBuilder, build_kvei, build_kvei_from_seg};
 pub use merge::{MergeOptions, merge};
 pub use seg_writer::SegWriter;
 
