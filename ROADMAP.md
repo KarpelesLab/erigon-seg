@@ -63,19 +63,27 @@ binary decompress our output.
 
 ---
 
-## Phase 3 — `.bt` writer ⬤  *(depends on Phase 1 EF builder)*
+## Phase 3 — `.bt` writer ⬤⬤  *(depends on Phase 1 EF builder)*
 
-Minimal legacy layout = **just the serialized Elias-Fano** of key offsets (the reader and
-Erigon both treat trailing B-tree nodes as optional). Walk the `.kv` keys, record each
-key's word offset, `add_offset`, `build`, `write`.
+Support **both** on-disk layouts, selectable via a writer option (default: footer, to
+match current Erigon output):
 
-- API: `build_bt(kv_path, out_bt_path)` and/or fold into the high-level writer.
-- *Optional later:* footer layout (`[0x01][nodes][EF][footer][anchor]`) + di-nodes for
-  co-located binary search on huge cold files. *Ref:* `btree_index.go` `BtIndexWriter`,
-  `footer.go`.
+- **Legacy** = just the serialized Elias-Fano of key offsets (the reader and Erigon both
+  treat trailing B-tree nodes as optional). Walk the `.kv` keys, record each key's word
+  offset, `add_offset`, `build`, `write`.
+- **Footer** = `[0x01][nodes][EF][footer][anchor]`: the di-nodes blob (page-aligned EF),
+  the EF section aligned to `btEFAlign` (4096), then the variable footer
+  (`keys_count | M | ef_offset`) and the fixed 16-byte anchor (`footer_len | flags |
+  version | magic="erigon\0\0"`). Enables co-located binary search on huge cold files.
+  *Ref:* `btree_index.go` `BtIndexWriter`/`AddKey`/`Build`, `footer.go` `Footer::Encode`.
 
-**Verification:** build a `.bt` from a real `.kv`, compare `EliasFano::get(i)` for all `i`
-against the real `.bt`'s offsets (must match exactly).
+- API: `BtWriter` with a `BtLayout::{Legacy, Footer}` option; `build_bt(kv, out, layout)`
+  and/or folded into the high-level writer.
+
+**Verification:** for both layouts, build a `.bt` from a real `.kv` and compare
+`EliasFano::get(i)` for all `i` against the real `.bt`'s offsets (must match exactly); the
+footer build should additionally byte-match the real footer/anchor and re-open through our
+own footer reader.
 
 ---
 
@@ -118,8 +126,12 @@ Erigon's step-range semantics). Stream merged pairs straight into `DomainWriter`
 
 - API: `merge(&[input_kv_paths], out_base, opts)`; derive `<from>-<to>` from inputs.
 - Streaming (heap of getters), constant memory regardless of file size.
-- Decide tombstone/empty-value handling (drop deleted keys?) — confirm against Erigon
-  domain-merge semantics before finalizing.
+- **Tombstones — drop deleted entries:** a key whose *newest* occurrence is a deletion is
+  omitted from the output entirely (not carried forward). ⚠️ Confirm the exact deletion
+  encoding against Erigon before finalizing: an empty (0-byte) value is **not** by itself
+  a tombstone — real latest-state `.kv` files legitimately store empty values (e.g. an
+  account with zero nonce/balance and no code). Identify the true deletion marker (or
+  pass a caller-supplied `is_deleted(value)` predicate) so we never drop live keys.
 
 **Verification:** merge real adjacent snapshots (e.g. `2256-2257` + `2256-2258`); for a
 key sample, `merged.get(k)` must equal the newest input's `get(k)`; merged key set =
@@ -150,7 +162,6 @@ percent of Erigon on the same corpus; differential test vs. real files.
 
 - Differential round-trip fuzzing (write → read → compare) across word-size/shape edge
   cases; `cargo fuzz` targets for the writer + merge.
-- Optional `.bt` footer layout + di-nodes (Phase 3 extension) for cold-lookup speed.
 - Optional `.kv` V1 header + page-level compression *writing* (reader already parses V1).
 - Cross-tool validation: a small harness that shells out to an Erigon build to read files
   we wrote (and vice-versa), gated like `tests/real_files.rs`.
