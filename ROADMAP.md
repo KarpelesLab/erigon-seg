@@ -1,7 +1,23 @@
 # Roadmap: write + merge
 
-The reader (Phase 0) is complete and verified against real Erigon v1.1 files. This
-document plans the path to a full read/write/merge library.
+**Status:** the reader (Phase 0) and the full write + merge critical path (Phases 1–6)
+and hardening (Phase 8) are **complete and verified against real Erigon v1.1 files**. The
+only remaining item is Phase 7 (optional `seg` pattern compression for output size
+parity); files written today are valid and interoperable, just larger than erigon's.
+
+| Phase | What | Status |
+|------:|------|--------|
+| 0 | Reader (`.kv`/`.bt`/`.kvei`, query, bloom) | ✅ done |
+| 1 | Writer primitives (BitWriter, Huffman, EF builder) | ✅ done |
+| 2 | `.kv` writer (no-pattern path) | ✅ done |
+| 3 | `.bt` writer (legacy + footer) | ✅ done |
+| 4 | `.kvei` bloom writer | ✅ done |
+| 5 | `DomainWriter` | ✅ done |
+| 6 | Merge (newest-wins, drop deletions at from=0) | ✅ done |
+| 7 | `seg` pattern compression (size parity) | ⬜ optional, not started |
+| 8 | Hardening (real-file write/merge tests, docs) | ✅ done |
+
+This document plans the path to a full read/write/merge library.
 
 A key finding from Erigon's source (`db/seg/parallel_compress.go`) shapes the plan:
 `compressNoWordPatterns` produces **fully valid, Erigon-readable `.kv` files with an

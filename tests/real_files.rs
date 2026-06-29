@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use erigon_seg::{
-    BtLayout, BtOptions, BtreeIndex, KvReader, Salt, Seg, build_bt, murmur3_x64_128_h1,
-    salt_from_file,
+    BtLayout, BtOptions, BtreeIndex, KvReader, MergeOptions, Salt, Seg, SegWriter, build_bt, merge,
+    murmur3_x64_128_h1, salt_from_file,
 };
 
 /// Return the test dir from the env, or `None` to skip.
@@ -30,6 +30,99 @@ fn smallest_kv(dir: &Path) -> Option<PathBuf> {
         .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (m.len(), p)))
         .min_by_key(|(len, _)| *len)
         .map(|(_, p)| p)
+}
+
+/// The `n` smallest `.kv` files in the dir, smallest first.
+fn smallest_kvs(dir: &Path, n: usize) -> Vec<PathBuf> {
+    let mut v: Vec<(u64, PathBuf)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "kv"))
+        .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (m.len(), p)))
+        .collect();
+    v.sort_by_key(|(len, _)| *len);
+    v.into_iter().take(n).map(|(_, p)| p).collect()
+}
+
+/// Re-encode a real `.kv` through SegWriter and confirm every word survives byte-exact.
+#[test]
+fn rewrites_real_kv_roundtrip() {
+    let Some(dir) = test_dir() else {
+        eprintln!("ERIGON_SEG_TEST_DIR not set; skipping");
+        return;
+    };
+    let Some(kv) = smallest_kv(&dir) else { return };
+    eprintln!("re-encoding {}", kv.display());
+
+    let seg = Seg::open(&kv).expect("open real .kv");
+    let out = std::env::temp_dir().join(format!("erigon_seg_recode_{}.kv", std::process::id()));
+    let mut w = SegWriter::create(&out).unwrap();
+    let mut g = seg.getter();
+    while g.has_next() {
+        let word = g.next();
+        w.add_word(&word).unwrap();
+    }
+    w.finish().unwrap();
+
+    let seg2 = Seg::open(&out).expect("open rewritten .kv");
+    assert_eq!(seg2.words_count(), seg.words_count());
+    let (mut a, mut b) = (seg.getter(), seg2.getter());
+    let mut n = 0u64;
+    while a.has_next() {
+        assert!(b.has_next(), "rewritten ran short at word {n}");
+        assert_eq!(a.next(), b.next(), "word {n} differs after re-encode");
+        n += 1;
+    }
+    assert!(!b.has_next(), "rewritten has extra words");
+    let _ = std::fs::remove_file(&out);
+}
+
+/// Merge two real `.kv` files and verify newest-wins + union against the source readers.
+#[test]
+fn merges_real_files() {
+    let Some(dir) = test_dir() else {
+        eprintln!("ERIGON_SEG_TEST_DIR not set; skipping");
+        return;
+    };
+    let kvs = smallest_kvs(&dir, 2);
+    if kvs.len() < 2 {
+        eprintln!("need >=2 .kv files; skipping");
+        return;
+    }
+    let (older, newer) = (&kvs[0], &kvs[1]);
+    eprintln!("merging {} (old) + {} (new)", older.display(), newer.display());
+
+    // Output range start != 0 so legitimate empty values are preserved.
+    let out = std::env::temp_dir().join(format!("erigon_seg_merge_{}.100-200.kv", std::process::id()));
+    merge(&[older, newer], &out, MergeOptions::default()).expect("merge");
+
+    let r_old = KvReader::open(older).unwrap();
+    let r_new = KvReader::open(newer).unwrap();
+    let r_out = KvReader::open(&out).unwrap();
+
+    // Sample keys from both inputs; merged value must be newest-wins.
+    let mut checked = 0u64;
+    for src in [&r_new, &r_old] {
+        for kv in src.iter().step_by(617).take(400) {
+            let (k, _) = kv.unwrap();
+            let expect = r_new.get(&k).unwrap().or(r_old.get(&k).unwrap());
+            assert_eq!(r_out.get(&k).unwrap(), expect, "newest-wins mismatch for a key");
+            checked += 1;
+        }
+    }
+    // Merged key set is the union (these inputs have no deletions dropped at from!=0).
+    let mut union: std::collections::BTreeSet<Vec<u8>> = std::collections::BTreeSet::new();
+    for src in [&r_old, &r_new] {
+        for kv in src.iter() {
+            union.insert(kv.unwrap().0);
+        }
+    }
+    assert_eq!(r_out.key_count(), union.len() as u64, "merged key_count != union size");
+    eprintln!("merged {} keys, checked {checked} lookups", r_out.key_count());
+
+    let _ = std::fs::remove_file(&out);
+    let _ = std::fs::remove_file(out.with_extension("bt"));
 }
 
 /// Rebuild a `.bt` from a real `.kv` and confirm every offset matches the real `.bt`.
