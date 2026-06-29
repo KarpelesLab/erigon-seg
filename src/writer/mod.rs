@@ -8,9 +8,11 @@ mod bitwriter;
 mod bt_writer;
 mod ef_builder;
 mod huffman;
+mod kvei_writer;
 mod seg_writer;
 
 pub use bt_writer::{BtLayout, BtOptions, DEFAULT_BTREE_M, build_bt, build_bt_from_seg};
+pub use kvei_writer::{KveiBuilder, build_kvei_from_seg};
 pub use seg_writer::SegWriter;
 
 #[cfg(test)]
@@ -95,6 +97,46 @@ mod tests {
     fn bt_writer_both_layouts() {
         bt_check(super::BtLayout::Legacy);
         bt_check(super::BtLayout::Footer);
+    }
+
+    #[test]
+    fn kvei_writer_roundtrips_and_accelerates() {
+        use crate::{ExistenceFilter, KvReader, Salt, murmur3_x64_128_h1};
+        let salt = 12_345u32; // small so the find_salt brute-force below stays fast
+        let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..5000u32)
+            .map(|i| (format!("addr{i:010}").into_bytes(), vec![(i % 255) as u8; 12]))
+            .collect();
+        let base = scratch("kvei");
+        let kv = base.with_extension("kv");
+        let bt = base.with_extension("bt");
+        let kvei = base.with_extension("kvei");
+        write_kv(&kv, &pairs);
+        super::build_bt(&kv, &bt, super::BtOptions::default()).unwrap();
+        let seg = Seg::open(&kv).unwrap();
+        super::build_kvei_from_seg(&seg, salt, &kvei).unwrap();
+
+        // No false negatives: every real key must be reported present.
+        let f = ExistenceFilter::open(&kvei).unwrap();
+        assert!(f.is_accelerating());
+        for (k, _) in &pairs {
+            assert!(f.contains_hash(murmur3_x64_128_h1(k, salt)), "false negative for {k:?}");
+        }
+
+        // End-to-end: KvReader enables the bloom (self-validates) and lookups stay correct.
+        let mut r = KvReader::open(&kv).unwrap();
+        assert!(r.enable_bloom(Salt::Known(salt)));
+        assert_eq!(r.salt(), Some(salt));
+        for (k, v) in pairs.iter().step_by(53) {
+            assert_eq!(r.get(k).unwrap().as_deref(), Some(v.as_slice()));
+        }
+        assert!(r.get(b"addr9999999999").unwrap().is_none());
+
+        // find_salt should also recover our salt from the generated filter.
+        assert_eq!(r.find_salt(8), Some(salt));
+
+        for p in [&kv, &bt, &kvei] {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     #[test]
