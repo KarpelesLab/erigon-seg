@@ -10,11 +10,13 @@ mod domain;
 mod ef_builder;
 mod huffman;
 mod kvei_writer;
+mod merge;
 mod seg_writer;
 
 pub use bt_writer::{BtLayout, BtOptions, DEFAULT_BTREE_M, build_bt, build_bt_from_seg};
 pub use domain::{DomainOptions, DomainPaths, DomainWriter};
 pub use kvei_writer::{KveiBuilder, build_kvei_from_seg};
+pub use merge::{MergeOptions, merge};
 pub use seg_writer::SegWriter;
 
 #[cfg(test)]
@@ -174,6 +176,53 @@ mod tests {
 
         for p in [&paths.kv, &paths.bt, paths.kvei.as_ref().unwrap(), &kv2] {
             let _ = std::fs::remove_file(p);
+        }
+    }
+
+    #[test]
+    fn merge_newest_wins_and_deletes() {
+        use crate::{DomainOptions, DomainWriter, KvReader, MergeOptions, merge};
+
+        // Build two inputs. older has keys a,b,c,e; newer overrides b, deletes c (empty),
+        // adds d. Expected union with newest-wins: a(old), b(new), c(empty), d(new), e(old).
+        let dir = std::env::temp_dir();
+        let mk = |name: &str, pairs: &[(&str, &[u8])]| {
+            let p = dir.join(format!("erigon_seg_{}_{name}", std::process::id()));
+            let mut w = DomainWriter::create(&p, DomainOptions::default()).unwrap();
+            for (k, v) in pairs {
+                w.add(k.as_bytes(), v).unwrap();
+            }
+            w.finish().unwrap();
+            p
+        };
+        let older = mk("m.0-1.kv", &[("a", b"a0"), ("b", b"b0"), ("c", b"c0"), ("e", b"e0")]);
+        let newer = mk("m.1-2.kv", &[("b", b"b1"), ("c", b""), ("d", b"d1")]);
+
+        // (1) Non-zero range (out 0-... actually parse range_from explicitly = 1): keep empties.
+        let out_keep = dir.join(format!("erigon_seg_{}_out.1-2.kv", std::process::id()));
+        merge(&[&older, &newer], &out_keep, MergeOptions::default()).unwrap();
+        let r = KvReader::open(&out_keep).unwrap();
+        assert_eq!(r.key_count(), 5);
+        let got: std::collections::BTreeMap<Vec<u8>, Vec<u8>> =
+            r.iter().map(|kv| kv.unwrap()).collect();
+        assert_eq!(got[b"a".as_slice()], b"a0"); // only in older
+        assert_eq!(got[b"b".as_slice()], b"b1"); // newer overrides
+        assert_eq!(got[b"c".as_slice()], b""); // empty kept (range_from != 0)
+        assert_eq!(got[b"d".as_slice()], b"d1");
+        assert_eq!(got[b"e".as_slice()], b"e0");
+
+        // (2) From-zero range: the empty value for c is a deletion and is dropped.
+        let out_del = dir.join(format!("erigon_seg_{}_out.0-2.kv", std::process::id()));
+        merge(&[&older, &newer], &out_del, MergeOptions::default()).unwrap();
+        let r2 = KvReader::open(&out_del).unwrap();
+        assert_eq!(r2.key_count(), 4, "c should be dropped at from=0");
+        assert!(r2.get(b"c").unwrap().is_none());
+        assert_eq!(r2.get(b"b").unwrap().as_deref(), Some(b"b1".as_slice()));
+
+        for stem in ["m.0-1", "m.1-2", "out.1-2", "out.0-2"] {
+            for ext in ["kv", "bt"] {
+                let _ = std::fs::remove_file(dir.join(format!("erigon_seg_{}_{stem}.{ext}", std::process::id())));
+            }
         }
     }
 
