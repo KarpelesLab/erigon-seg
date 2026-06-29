@@ -35,7 +35,11 @@ pub struct MergeOptions {
 
 impl Default for MergeOptions {
     fn default() -> MergeOptions {
-        MergeOptions { domain: DomainOptions::default(), drop_deleted: true, range_from: None }
+        MergeOptions {
+            domain: DomainOptions::default(),
+            drop_deleted: true,
+            range_from: None,
+        }
     }
 }
 
@@ -104,7 +108,11 @@ pub fn merge(
         for idx in advance {
             if getters[idx].has_next() {
                 let k = getters[idx].next();
-                let v = if getters[idx].has_next() { getters[idx].next() } else { Vec::new() };
+                let v = if getters[idx].has_next() {
+                    getters[idx].next()
+                } else {
+                    Vec::new()
+                };
                 heap.push(Reverse((k.clone(), idx)));
                 heads[idx] = Some((k, v));
             }

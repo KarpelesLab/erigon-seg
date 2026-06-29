@@ -57,7 +57,10 @@ struct PatternTable {
 
 impl PatternTable {
     fn new(bit_len: i32) -> PatternTable {
-        PatternTable { patterns: vec![None; 1usize << bit_len.max(0)], bit_len }
+        PatternTable {
+            patterns: vec![None; 1usize << bit_len.max(0)],
+            bit_len,
+        }
     }
     fn insert(&mut self, cw: Arc<Codeword>, code: u16) {
         let code_step: u16 = 1 << cw.len;
@@ -88,7 +91,11 @@ fn build_pattern_table(
         return 0;
     }
     if depth == depths[0] {
-        let cw = Arc::new(Codeword { pattern: patterns[0].to_vec(), ptr: None, len: bits as u8 });
+        let cw = Arc::new(Codeword {
+            pattern: patterns[0].to_vec(),
+            ptr: None,
+            len: bits as u8,
+        });
         table.insert(cw, code);
         return 1;
     }
@@ -96,14 +103,26 @@ fn build_pattern_table(
         let bl = if max_depth > 9 { 9 } else { max_depth as i32 };
         let mut nested = PatternTable::new(bl);
         let consumed = build_pattern_table(&mut nested, depths, patterns, 0, 0, depth, max_depth);
-        let cw = Arc::new(Codeword { pattern: Vec::new(), ptr: Some(Box::new(nested)), len: 0 });
+        let cw = Arc::new(Codeword {
+            pattern: Vec::new(),
+            ptr: Some(Box::new(nested)),
+            len: 0,
+        });
         table.insert(cw, code);
         return consumed;
     }
     if max_depth == 0 {
         return 0;
     }
-    let b0 = build_pattern_table(table, depths, patterns, code, bits + 1, depth + 1, max_depth - 1);
+    let b0 = build_pattern_table(
+        table,
+        depths,
+        patterns,
+        code,
+        bits + 1,
+        depth + 1,
+        max_depth - 1,
+    );
     let b1 = build_pattern_table(
         table,
         &depths[b0..],
@@ -128,7 +147,12 @@ struct PosTable {
 impl PosTable {
     fn new(bit_len: i32) -> PosTable {
         let n = 1usize << bit_len.max(0);
-        PosTable { pos: vec![0; n], lens: vec![0; n], ptrs: (0..n).map(|_| None).collect(), bit_len }
+        PosTable {
+            pos: vec![0; n],
+            lens: vec![0; n],
+            ptrs: (0..n).map(|_| None).collect(),
+            bit_len,
+        }
     }
 }
 
@@ -176,7 +200,15 @@ fn build_pos_table(
     if max_depth == 0 {
         return 0;
     }
-    let b0 = build_pos_table(depths, poss, table, code, bits + 1, depth + 1, max_depth - 1);
+    let b0 = build_pos_table(
+        depths,
+        poss,
+        table,
+        code,
+        bits + 1,
+        depth + 1,
+        max_depth - 1,
+    );
     let b1 = build_pos_table(
         &depths[b0..],
         &poss[b0..],
@@ -478,7 +510,9 @@ impl<'a> Getter<'a> {
             code &= (1u16 << table.bit_len) - 1;
             let l = table.lens[code as usize];
             if l == 0 {
-                table = table.ptrs[code as usize].as_deref().expect("pos inner node missing");
+                table = table.ptrs[code as usize]
+                    .as_deref()
+                    .expect("pos inner node missing");
                 self.data_bit += 9;
             } else {
                 self.data_bit += l as i32;
@@ -496,7 +530,10 @@ impl<'a> Getter<'a> {
     fn next_pattern(&mut self) -> &'a [u8] {
         let mut table = self.pattern_dict.expect("pattern dict missing");
         if table.bit_len == 0 {
-            return &table.patterns[0].as_ref().expect("empty pattern table").pattern;
+            return &table.patterns[0]
+                .as_ref()
+                .expect("empty pattern table")
+                .pattern;
         }
         let data = self.data;
         let data_len = data.len();
@@ -506,7 +543,9 @@ impl<'a> Getter<'a> {
                 code |= (data[self.data_p as usize + 1] as u16) << (8 - self.data_bit);
             }
             code &= (1u16 << table.bit_len) - 1;
-            let cw = table.patterns[code as usize].as_ref().expect("missing codeword");
+            let cw = table.patterns[code as usize]
+                .as_ref()
+                .expect("missing codeword");
             let l = cw.len;
             if l == 0 {
                 table = cw.ptr.as_deref().expect("pattern inner node missing");

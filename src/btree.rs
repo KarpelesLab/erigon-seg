@@ -75,7 +75,10 @@ impl BtreeIndex {
                     ef.len()
                 )));
             }
-            return Ok(BtreeIndex { ef: Some(ef), m: Some(m) });
+            return Ok(BtreeIndex {
+                ef: Some(ef),
+                m: Some(m),
+            });
         }
 
         // No magic: must be the legacy layout, whose first byte is 0x00.
@@ -86,7 +89,10 @@ impl BtreeIndex {
             )));
         }
         let ef = EliasFano::open(mmap, 0)?;
-        Ok(BtreeIndex { ef: Some(ef), m: None })
+        Ok(BtreeIndex {
+            ef: Some(ef),
+            m: None,
+        })
     }
 
     /// Number of indexed keys.

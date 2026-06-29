@@ -38,7 +38,11 @@ impl EfBuilder {
         let stored = count - 1;
         let u = max_offset + 1;
         let count_plus_1 = stored + 1; // == count
-        let l = if u / count_plus_1 == 0 { 0 } else { 63 - (u / count_plus_1).leading_zeros() as u64 };
+        let l = if u / count_plus_1 == 0 {
+            0
+        } else {
+            63 - (u / count_plus_1).leading_zeros() as u64
+        };
         let lower_mask = if l == 0 { 0 } else { (1u64 << l) - 1 };
         let words_lower = (((count_plus_1) * l).div_ceil(64) + 1) as usize;
         let words_upper = (count_plus_1 + (u >> l)).div_ceil(64) as usize;
@@ -104,7 +108,8 @@ impl EfBuilder {
                 let idx64 = (jump_super_q + 1 + (jump_inside >> 1)) as usize;
                 let shift = 32 * (jump_inside % 2);
                 let mask = 0xffff_ffffu64 << shift;
-                self.data[jump_base + idx64] = (self.data[jump_base + idx64] & !mask) | (offset << shift);
+                self.data[jump_base + idx64] =
+                    (self.data[jump_base + idx64] & !mask) | (offset << shift);
                 c += 1;
                 word &= word - 1;
             }

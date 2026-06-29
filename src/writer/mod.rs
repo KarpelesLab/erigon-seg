@@ -65,7 +65,12 @@ mod tests {
     fn bt_check(layout: super::BtLayout) {
         use crate::{BtreeIndex, KvReader};
         let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..1000u32)
-            .map(|i| (format!("key{i:08}").into_bytes(), format!("val-{i}").into_bytes()))
+            .map(|i| {
+                (
+                    format!("key{i:08}").into_bytes(),
+                    format!("val-{i}").into_bytes(),
+                )
+            })
             .collect();
         // Keys are already sorted lexicographically by the zero-padded format.
         let base = scratch(&format!("bt_{layout:?}"));
@@ -90,7 +95,11 @@ mod tests {
         // End-to-end through KvReader.get on every key + a few misses.
         let r = KvReader::open(&kv).unwrap();
         for (k, v) in &pairs {
-            assert_eq!(r.get(k).unwrap().as_deref(), Some(v.as_slice()), "get {k:?} ({layout:?})");
+            assert_eq!(
+                r.get(k).unwrap().as_deref(),
+                Some(v.as_slice()),
+                "get {k:?} ({layout:?})"
+            );
         }
         assert!(r.get(b"key99999999").unwrap().is_none());
         assert!(r.get(b"aaa").unwrap().is_none());
@@ -109,7 +118,12 @@ mod tests {
         use crate::{ExistenceFilter, KvReader, Salt, murmur3_x64_128_h1};
         let salt = 12_345u32; // small so the find_salt brute-force below stays fast
         let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..5000u32)
-            .map(|i| (format!("addr{i:010}").into_bytes(), vec![(i % 255) as u8; 12]))
+            .map(|i| {
+                (
+                    format!("addr{i:010}").into_bytes(),
+                    vec![(i % 255) as u8; 12],
+                )
+            })
             .collect();
         let base = scratch("kvei");
         let kv = base.with_extension("kv");
@@ -124,7 +138,10 @@ mod tests {
         let f = ExistenceFilter::open(&kvei).unwrap();
         assert!(f.is_accelerating());
         for (k, _) in &pairs {
-            assert!(f.contains_hash(murmur3_x64_128_h1(k, salt)), "false negative for {k:?}");
+            assert!(
+                f.contains_hash(murmur3_x64_128_h1(k, salt)),
+                "false negative for {k:?}"
+            );
         }
 
         // End-to-end: KvReader enables the bloom (self-validates) and lookups stay correct.
@@ -149,10 +166,22 @@ mod tests {
         use crate::{DomainOptions, DomainWriter, KvReader, Salt};
         let salt = 777u32;
         let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..3000u32)
-            .map(|i| (format!("k{i:09}").into_bytes(), format!("v{i}").into_bytes()))
+            .map(|i| {
+                (
+                    format!("k{i:09}").into_bytes(),
+                    format!("v{i}").into_bytes(),
+                )
+            })
             .collect();
         let kv = scratch("domain").with_extension("kv");
-        let mut w = DomainWriter::create(&kv, DomainOptions { salt: Some(salt), ..Default::default() }).unwrap();
+        let mut w = DomainWriter::create(
+            &kv,
+            DomainOptions {
+                salt: Some(salt),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         for (k, v) in &pairs {
             w.add(k, v).unwrap();
         }
@@ -196,7 +225,10 @@ mod tests {
             w.finish().unwrap();
             p
         };
-        let older = mk("m.0-1.kv", &[("a", b"a0"), ("b", b"b0"), ("c", b"c0"), ("e", b"e0")]);
+        let older = mk(
+            "m.0-1.kv",
+            &[("a", b"a0"), ("b", b"b0"), ("c", b"c0"), ("e", b"e0")],
+        );
         let newer = mk("m.1-2.kv", &[("b", b"b1"), ("c", b""), ("d", b"d1")]);
 
         // (1) Non-zero range (out 0-... actually parse range_from explicitly = 1): keep empties.
@@ -222,7 +254,9 @@ mod tests {
 
         for stem in ["m.0-1", "m.1-2", "out.1-2", "out.0-2"] {
             for ext in ["kv", "bt"] {
-                let _ = std::fs::remove_file(dir.join(format!("erigon_seg_{}_{stem}.{ext}", std::process::id())));
+                let _ = std::fs::remove_file(
+                    dir.join(format!("erigon_seg_{}_{stem}.{ext}", std::process::id())),
+                );
             }
         }
     }
@@ -233,8 +267,12 @@ mod tests {
         // Repetitive content so the dictionary finds real patterns.
         let words: Vec<Vec<u8>> = (0..4000u32)
             .map(|i| {
-                format!("account:{:04}:balance=0x0000000000000000000000000000000000:nonce={}", i % 64, i % 7)
-                    .into_bytes()
+                format!(
+                    "account:{:04}:balance=0x0000000000000000000000000000000000:nonce={}",
+                    i % 64,
+                    i % 7
+                )
+                .into_bytes()
             })
             .collect();
 
@@ -262,8 +300,14 @@ mod tests {
         // It should be meaningfully smaller than the no-pattern file.
         let plain_sz = std::fs::metadata(&plain).unwrap().len();
         let comp_sz = std::fs::metadata(&comp).unwrap().len();
-        assert!(comp_sz < plain_sz, "compressed {comp_sz} not < plain {plain_sz}");
-        eprintln!("compressed {comp_sz} vs plain {plain_sz} ({:.1}% )", 100.0 * comp_sz as f64 / plain_sz as f64);
+        assert!(
+            comp_sz < plain_sz,
+            "compressed {comp_sz} not < plain {plain_sz}"
+        );
+        eprintln!(
+            "compressed {comp_sz} vs plain {plain_sz} ({:.1}% )",
+            100.0 * comp_sz as f64 / plain_sz as f64
+        );
 
         let _ = std::fs::remove_file(&plain);
         let _ = std::fs::remove_file(&comp);
@@ -286,7 +330,9 @@ mod tests {
             (0..=255u8).collect(),
         ]);
         // Many words exercising a larger position dictionary.
-        let many: Vec<Vec<u8>> = (0..2000u32).map(|i| vec![(i % 251) as u8; (i % 64) as usize]).collect();
+        let many: Vec<Vec<u8>> = (0..2000u32)
+            .map(|i| vec![(i % 251) as u8; (i % 64) as usize])
+            .collect();
         seg_roundtrip(&many);
     }
 
@@ -301,8 +347,11 @@ mod tests {
         b.write_to(&mut bytes);
         assert_eq!(bytes.len(), b.serialized_len());
 
-        let path = std::env::temp_dir()
-            .join(format!("erigon_seg_ef_{}_{}.bin", std::process::id(), offsets.len()));
+        let path = std::env::temp_dir().join(format!(
+            "erigon_seg_ef_{}_{}.bin",
+            std::process::id(),
+            offsets.len()
+        ));
         std::fs::write(&path, &bytes).unwrap();
         let ef = EliasFano::open(mmap_file(&path).unwrap(), 0).unwrap();
         let _ = std::fs::remove_file(&path);

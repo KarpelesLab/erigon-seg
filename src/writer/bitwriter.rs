@@ -14,13 +14,21 @@ pub(crate) struct BitWriter<'a> {
 
 impl<'a> BitWriter<'a> {
     pub(crate) fn new(out: &'a mut Vec<u8>) -> BitWriter<'a> {
-        BitWriter { out, output_bits: 0, output_byte: 0 }
+        BitWriter {
+            out,
+            output_bits: 0,
+            output_byte: 0,
+        }
     }
 
     /// Emit the low `code_bits` bits of `code`, low bit first.
     pub(crate) fn encode(&mut self, mut code: u64, mut code_bits: u32) {
         while code_bits > 0 {
-            let bits_used = if self.output_bits + code_bits > 8 { 8 - self.output_bits } else { code_bits };
+            let bits_used = if self.output_bits + code_bits > 8 {
+                8 - self.output_bits
+            } else {
+                code_bits
+            };
             let mask = (1u64 << bits_used) - 1;
             self.output_byte |= ((code & mask) << self.output_bits) as u8;
             code >>= bits_used;

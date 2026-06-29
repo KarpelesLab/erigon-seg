@@ -37,7 +37,11 @@ pub enum FilterKind {
 
 enum Inner {
     Empty,
-    Bloom { keys: [u64; 3], m: u64, bits_off: usize },
+    Bloom {
+        keys: [u64; 3],
+        m: u64,
+        bits_off: usize,
+    },
     Unsupported,
 }
 
@@ -74,7 +78,11 @@ impl ExistenceFilter {
             }
             let nwords = m.div_ceil(64) as usize;
             if k == 3 && m >= 2 && BLOOM_BITS_OFFSET + nwords * 8 <= d.len() {
-                return Inner::Bloom { keys, m, bits_off: BLOOM_BITS_OFFSET };
+                return Inner::Bloom {
+                    keys,
+                    m,
+                    bits_off: BLOOM_BITS_OFFSET,
+                };
             }
         }
         // Not a (valid) bloom: a fuse filter or something we don't decode. Safe to
@@ -134,7 +142,11 @@ mod tests {
     #[test]
     fn bloom_roundtrip_via_file() {
         let m: u64 = 4096;
-        let keys: [u64; 3] = [0x1111_2222_3333_4444, 0xaaaa_bbbb_cccc_dddd, 0xdead_beef_0bad_f00d];
+        let keys: [u64; 3] = [
+            0x1111_2222_3333_4444,
+            0xaaaa_bbbb_cccc_dddd,
+            0xdead_beef_0bad_f00d,
+        ];
         let nwords = (m as usize).div_ceil(64);
         let mut bits = vec![0u64; nwords];
         // AddHash(h): h = rotl(h,17) ^ key[n]; set bit (h % m).
@@ -147,7 +159,10 @@ mod tests {
         };
         // Use real murmur3 hashes of a few keys so the test exercises the full path.
         let present_keys: [&[u8]; 3] = [b"alpha", b"bravo-key", b"0123456789abcdef0123"];
-        let present: Vec<u64> = present_keys.iter().map(|k| murmur3_x64_128_h1(k, 9)).collect();
+        let present: Vec<u64> = present_keys
+            .iter()
+            .map(|k| murmur3_x64_128_h1(k, 9))
+            .collect();
         for &h in &present {
             add(&mut bits, h);
         }
@@ -165,7 +180,8 @@ mod tests {
         }
         buf.extend_from_slice(&[0u8; 48]);
 
-        let path = std::env::temp_dir().join(format!("erigon_seg_bloom_{}.kvei", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("erigon_seg_bloom_{}.kvei", std::process::id()));
         std::fs::write(&path, &buf).unwrap();
         let f = ExistenceFilter::open(&path).expect("open bloom");
         let _ = std::fs::remove_file(&path);
@@ -193,7 +209,11 @@ mod tests {
 
         // A non-bloom blob (looks like a fuse filter) -> Unsupported, still match-all.
         let fuse = dir.join(format!("erigon_seg_fuse_{}.kvei", std::process::id()));
-        std::fs::write(&fuse, [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]).unwrap();
+        std::fs::write(
+            &fuse,
+            [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        )
+        .unwrap();
         let f = ExistenceFilter::open(&fuse).unwrap();
         let _ = std::fs::remove_file(&fuse);
         assert_eq!(f.kind(), FilterKind::Unsupported);

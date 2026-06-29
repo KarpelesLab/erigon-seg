@@ -66,7 +66,7 @@ mod util;
 mod varint;
 mod writer;
 
-pub use bloom::ExistenceFilter;
+pub use bloom::{ExistenceFilter, FilterKind};
 pub use btree::BtreeIndex;
 pub use eliasfano::EliasFano;
 pub use error::{Error, Result};

@@ -9,8 +9,12 @@ use erigon_seg::{DomainOptions, DomainWriter, KvReader, Salt, Seg, salt_from_fil
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let in_kv = args.next().expect("usage: recode <in.kv> <out.kv> [salt-state.txt]");
-    let out_kv = args.next().expect("usage: recode <in.kv> <out.kv> [salt-state.txt]");
+    let in_kv = args
+        .next()
+        .expect("usage: recode <in.kv> <out.kv> [salt-state.txt]");
+    let out_kv = args
+        .next()
+        .expect("usage: recode <in.kv> <out.kv> [salt-state.txt]");
     let salt = args.next().and_then(salt_from_file);
 
     // Read the source words (key/value pairs) and stream them into a DomainWriter.
@@ -19,7 +23,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("source: {} words ({} keys)", n_words, n_words / 2);
 
     let t = Instant::now();
-    let mut w = DomainWriter::create(&out_kv, DomainOptions { salt, ..Default::default() })?;
+    let mut w = DomainWriter::create(
+        &out_kv,
+        DomainOptions {
+            salt,
+            ..Default::default()
+        },
+    )?;
     let mut g = src.getter();
     while g.has_next() {
         let key = g.next();
@@ -42,7 +52,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If we built a bloom, confirm it accelerates lookups without false negatives.
     if let Some(s) = salt {
         let mut r = KvReader::open(&out_kv)?;
-        assert!(r.enable_bloom(Salt::Known(s)), "rebuilt .kvei failed to validate");
+        assert!(
+            r.enable_bloom(Salt::Known(s)),
+            "rebuilt .kvei failed to validate"
+        );
         let mut checked = 0;
         for kv in r.iter().step_by(997).take(500) {
             let (k, v) = kv?;

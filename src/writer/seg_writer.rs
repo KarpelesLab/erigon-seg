@@ -73,8 +73,12 @@ impl SegWriter {
         }
         let mut hdr = Vec::with_capacity(5);
         put_uvarint(&mut hdr, l);
-        self.tmp.write_all(&hdr).map_err(|e| Error::io(&self.tmp_path, e))?;
-        self.tmp.write_all(word).map_err(|e| Error::io(&self.tmp_path, e))?;
+        self.tmp
+            .write_all(&hdr)
+            .map_err(|e| Error::io(&self.tmp_path, e))?;
+        self.tmp
+            .write_all(word)
+            .map_err(|e| Error::io(&self.tmp_path, e))?;
         Ok(())
     }
 
@@ -112,8 +116,11 @@ impl SegWriter {
             put_uvarint(&mut pos_dict_bytes, e.pos);
         }
 
-        let mut out = BufWriter::new(File::create(&self.kv_path).map_err(|e| Error::io(&self.kv_path, e))?);
-        let w = |out: &mut BufWriter<File>, b: &[u8]| out.write_all(b).map_err(|e| Error::io(&self.kv_path, e));
+        let mut out =
+            BufWriter::new(File::create(&self.kv_path).map_err(|e| Error::io(&self.kv_path, e))?);
+        let w = |out: &mut BufWriter<File>, b: &[u8]| {
+            out.write_all(b).map_err(|e| Error::io(&self.kv_path, e))
+        };
         // Header: words_count | empty_words_count | patterns_size(=0) | pos_dict_size | pos_dict
         w(&mut out, &self.words_count.to_be_bytes())?;
         w(&mut out, &self.empty_words_count.to_be_bytes())?;
@@ -123,15 +130,20 @@ impl SegWriter {
 
         // Pass over the buffered words: encode the length code, terminator, then literals.
         let code_of = |pos: u64| -> (u64, u32) {
-            *pos2code.get(&pos).expect("position missing from dictionary")
+            *pos2code
+                .get(&pos)
+                .expect("position missing from dictionary")
         };
-        let mut tmp_in = BufReader::new(File::open(&self.tmp_path).map_err(|e| Error::io(&self.tmp_path, e))?);
+        let mut tmp_in =
+            BufReader::new(File::open(&self.tmp_path).map_err(|e| Error::io(&self.tmp_path, e))?);
         let mut word_buf: Vec<u8> = Vec::new();
         let mut code_buf: Vec<u8> = Vec::new();
         while let Some(len) = read_uvarint(&mut tmp_in).map_err(|e| Error::io(&self.tmp_path, e))? {
             let len = len as usize;
             word_buf.resize(len, 0);
-            tmp_in.read_exact(&mut word_buf).map_err(|e| Error::io(&self.tmp_path, e))?;
+            tmp_in
+                .read_exact(&mut word_buf)
+                .map_err(|e| Error::io(&self.tmp_path, e))?;
 
             code_buf.clear();
             let mut bw = BitWriter::new(&mut code_buf);

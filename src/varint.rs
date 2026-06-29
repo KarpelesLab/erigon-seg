@@ -24,7 +24,10 @@ pub(crate) fn read_uvarint<R: Read>(r: &mut R) -> io::Result<Option<u64>> {
                 return if i == 0 {
                     Ok(None) // clean EOF at a record boundary
                 } else {
-                    Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated uvarint"))
+                    Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "truncated uvarint",
+                    ))
                 };
             }
             Ok(_) => {}
@@ -34,14 +37,20 @@ pub(crate) fn read_uvarint<R: Read>(r: &mut R) -> io::Result<Option<u64>> {
         let c = byte[0];
         if c < 0x80 {
             if i == 9 && c > 1 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "uvarint overflow"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "uvarint overflow",
+                ));
             }
             return Ok(Some(x | (c as u64) << s));
         }
         x |= ((c & 0x7f) as u64) << s;
         s += 7;
     }
-    Err(io::Error::new(io::ErrorKind::InvalidData, "uvarint overflow"))
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "uvarint overflow",
+    ))
 }
 
 /// Decode a Go `binary.Uvarint`: LEB128 unsigned. Returns `(value, bytes_read)`,

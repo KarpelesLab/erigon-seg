@@ -28,7 +28,10 @@ impl Error {
     }
 
     pub(crate) fn io(path: &Path, source: std::io::Error) -> Error {
-        Error::Io { path: path.into(), source }
+        Error::Io {
+            path: path.into(),
+            source,
+        }
     }
 }
 

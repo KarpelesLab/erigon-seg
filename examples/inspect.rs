@@ -14,7 +14,9 @@ fn hex(b: &[u8]) -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let kv_path = args.next().expect("usage: inspect <path-to.kv> [salt-state.txt]");
+    let kv_path = args
+        .next()
+        .expect("usage: inspect <path-to.kv> [salt-state.txt]");
     let salt_path = args.next();
 
     let t = Instant::now();
@@ -30,7 +32,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("    bt M           : {:?}", idx.m());
     }
     match r.existence_filter() {
-        Some(f) => println!("  .kvei kind       : {:?} (accelerating={})", f.kind(), f.is_accelerating()),
+        Some(f) => println!(
+            "  .kvei kind       : {:?} (accelerating={})",
+            f.kind(),
+            f.is_accelerating()
+        ),
         None => println!("  .kvei            : (none)"),
     }
 
@@ -39,7 +45,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sample: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     for (i, kv) in r.iter().enumerate().take(5) {
         let (k, v) = kv?;
-        println!("  [{i}] key={} ({} B)  value={} B", hex(&k), k.len(), v.len());
+        println!(
+            "  [{i}] key={} ({} B)  value={} B",
+            hex(&k),
+            k.len(),
+            v.len()
+        );
         sample.push((k, v));
     }
 
@@ -75,20 +86,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cross-check: get() value equals the value that follows the key in iteration order.
     for (k, v) in &sample {
-        assert_eq!(r.get(k)?.as_deref(), Some(v.as_slice()), "value mismatch for {}", hex(k));
+        assert_eq!(
+            r.get(k)?.as_deref(),
+            Some(v.as_slice()),
+            "value mismatch for {}",
+            hex(k)
+        );
     }
     println!("  values match sequential iteration ✓");
 
     // Negative lookup: a key we are confident is absent.
     let absent = b"\xff_erigon_seg_definitely_absent_key_\xff";
-    println!("\nnegative lookup for a synthetic key: {:?}", r.get(absent)?.map(|v| v.len()));
+    println!(
+        "\nnegative lookup for a synthetic key: {:?}",
+        r.get(absent)?.map(|v| v.len())
+    );
 
     // Salt resolution + bloom acceleration.
-    if r.existence_filter().map(|f| f.is_accelerating()).unwrap_or(false) {
+    if r.existence_filter()
+        .map(|f| f.is_accelerating())
+        .unwrap_or(false)
+    {
         // (a) brute-force find.
         let t = Instant::now();
         let found = r.find_salt(num_cpus());
-        println!("\nfind_salt -> {:?}  (in {:?})", found.map(|s| format!("{s:#010x}")), t.elapsed());
+        println!(
+            "\nfind_salt -> {:?}  (in {:?})",
+            found.map(|s| format!("{s:#010x}")),
+            t.elapsed()
+        );
 
         // (b) known salt from the salt file, if provided.
         let salt = match &salt_path {
@@ -103,20 +129,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let chosen = salt.map(Salt::Known).unwrap_or(Salt::Find(num_cpus()));
         let enabled = r.enable_bloom(chosen);
-        println!("enable_bloom     -> {enabled} (active salt = {:?})", r.salt().map(|s| format!("{s:#010x}")));
+        println!(
+            "enable_bloom     -> {enabled} (active salt = {:?})",
+            r.salt().map(|s| format!("{s:#010x}"))
+        );
 
         if let (Some(s), Some(f)) = (r.salt(), r.existence_filter()) {
             // Every real probe key must be reported present by the bloom.
-            let all_present = probe_keys.iter().all(|k| f.contains_hash(murmur3_x64_128_h1(k, s)));
-            println!("bloom: all {} real probe keys reported present = {all_present}", probe_keys.len());
-            assert!(all_present, "bloom false-negative on a real key (wrong salt?)");
+            let all_present = probe_keys
+                .iter()
+                .all(|k| f.contains_hash(murmur3_x64_128_h1(k, s)));
+            println!(
+                "bloom: all {} real probe keys reported present = {all_present}",
+                probe_keys.len()
+            );
+            assert!(
+                all_present,
+                "bloom false-negative on a real key (wrong salt?)"
+            );
 
             // Timed lookups with bloom enabled (negatives short-circuit).
             let t = Instant::now();
             for k in &probe_keys {
                 let _ = r.get(k)?;
             }
-            println!("  {} bloom-gated lookups in {:?}", probe_keys.len(), t.elapsed());
+            println!(
+                "  {} bloom-gated lookups in {:?}",
+                probe_keys.len(),
+                t.elapsed()
+            );
         }
     }
 
@@ -126,5 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Best-effort parallelism for the salt search without pulling in a dependency.
 fn num_cpus() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
 }

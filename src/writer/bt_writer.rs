@@ -48,12 +48,19 @@ pub struct BtOptions {
 
 impl Default for BtOptions {
     fn default() -> BtOptions {
-        BtOptions { layout: BtLayout::Footer, m: DEFAULT_BTREE_M }
+        BtOptions {
+            layout: BtLayout::Footer,
+            m: DEFAULT_BTREE_M,
+        }
     }
 }
 
 /// Build a `.bt` index for a `.kv` file, writing it to `bt_path`.
-pub fn build_bt(kv_path: impl AsRef<Path>, bt_path: impl AsRef<Path>, opts: BtOptions) -> Result<()> {
+pub fn build_bt(
+    kv_path: impl AsRef<Path>,
+    bt_path: impl AsRef<Path>,
+    opts: BtOptions,
+) -> Result<()> {
     let seg = Seg::open(kv_path)?;
     build_bt_from_seg(&seg, bt_path, opts)
 }
@@ -85,8 +92,9 @@ pub fn build_bt_from_seg(seg: &Seg, bt_path: impl AsRef<Path>, opts: BtOptions) 
         let off = g.offset();
         if footer && di % m == 0 {
             let key = g.next(); // need the bytes for this node
-            let klen = u16::try_from(key.len())
-                .map_err(|_| Error::format("key longer than 65535 bytes (unsupported in .bt node)"))?;
+            let klen = u16::try_from(key.len()).map_err(|_| {
+                Error::format("key longer than 65535 bytes (unsupported in .bt node)")
+            })?;
             nodes.extend_from_slice(&klen.to_be_bytes());
             nodes.extend_from_slice(&key);
         } else {

@@ -106,7 +106,13 @@ pub(crate) fn build_huffman(symbols: &[(u64, u64)]) -> Vec<HuffCode> {
     let mut syms: Vec<Sym> = symbols
         .iter()
         .enumerate()
-        .map(|(index, &(uses, init_code))| Sym { index, uses, code: init_code, code_bits: 0, depth: 0 })
+        .map(|(index, &(uses, init_code))| Sym {
+            index,
+            uses,
+            code: init_code,
+            code_bits: 0,
+            depth: 0,
+        })
         .collect();
     syms.sort_by(sym_cmp);
 
@@ -143,7 +149,12 @@ pub(crate) fn build_huffman(symbols: &[(u64, u64)]) -> Vec<HuffCode> {
             i += 1;
             (c, u)
         };
-        heap.push(HeapItem(Box::new(HuffNode { c0, c1, uses: u0 + u1, tie })));
+        heap.push(HeapItem(Box::new(HuffNode {
+            c0,
+            c1,
+            uses: u0 + u1,
+            tie,
+        })));
         tie += 1;
     }
 
@@ -154,7 +165,12 @@ pub(crate) fn build_huffman(symbols: &[(u64, u64)]) -> Vec<HuffCode> {
 
     syms.sort_by(sym_cmp);
     syms.into_iter()
-        .map(|s| HuffCode { index: s.index, depth: s.depth, code: s.code, code_bits: s.code_bits })
+        .map(|s| HuffCode {
+            index: s.index,
+            depth: s.depth,
+            code: s.code,
+            code_bits: s.code_bits,
+        })
         .collect()
 }
 
@@ -175,7 +191,12 @@ pub(crate) fn build_position_dict(pos_uses: &[(u64, u64)]) -> Vec<PosCode> {
         .into_iter()
         .map(|h| {
             let pos = pos_uses[h.index].0;
-            PosCode { pos, depth: h.depth, code: h.code, code_bits: h.code_bits }
+            PosCode {
+                pos,
+                depth: h.depth,
+                code: h.code,
+                code_bits: h.code_bits,
+            }
         })
         .collect()
 }
@@ -194,9 +215,18 @@ pub(crate) struct PatCode {
 pub(crate) fn build_pattern_dict(pattern_uses: &[u64]) -> Vec<PatCode> {
     // Pattern ordering is seeded by index (any deterministic seed yields a valid, reader-
     // reconstructable code; only compression efficiency depends on the choice).
-    let input: Vec<(u64, u64)> = pattern_uses.iter().enumerate().map(|(i, &u)| (u, i as u64)).collect();
+    let input: Vec<(u64, u64)> = pattern_uses
+        .iter()
+        .enumerate()
+        .map(|(i, &u)| (u, i as u64))
+        .collect();
     build_huffman(&input)
         .into_iter()
-        .map(|h| PatCode { index: h.index, depth: h.depth, code: h.code, code_bits: h.code_bits })
+        .map(|h| PatCode {
+            index: h.index,
+            depth: h.depth,
+            code: h.code,
+            code_bits: h.code_bits,
+        })
         .collect()
 }

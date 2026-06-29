@@ -49,15 +49,31 @@ impl KveiBuilder {
     /// (match-all) and serializes to a zero-byte file.
     pub fn new(key_count: u64) -> KveiBuilder {
         if key_count < 2 {
-            return KveiBuilder { keys: [0; 3], m: 0, n: key_count, bits: Vec::new(), empty: true };
+            return KveiBuilder {
+                keys: [0; 3],
+                m: 0,
+                n: key_count,
+                bits: Vec::new(),
+                empty: true,
+            };
         }
         let m = optimal_m(key_count).max(2);
         // Distinct, well-mixed XOR salts; their values only need to be reproducible, not
         // secret — every added key is recorded, so there are never false negatives.
         let mut seed = 0x1234_5678_9ABC_DEF0u64 ^ key_count;
-        let keys = [splitmix64(&mut seed), splitmix64(&mut seed), splitmix64(&mut seed)];
+        let keys = [
+            splitmix64(&mut seed),
+            splitmix64(&mut seed),
+            splitmix64(&mut seed),
+        ];
         let nwords = m.div_ceil(64) as usize;
-        KveiBuilder { keys, m, n: key_count, bits: vec![0u64; nwords], empty: false }
+        KveiBuilder {
+            keys,
+            m,
+            n: key_count,
+            bits: vec![0u64; nwords],
+            empty: false,
+        }
     }
 
     /// Add a pre-hashed key (murmur3 `h1`).
@@ -104,7 +120,11 @@ impl KveiBuilder {
 }
 
 /// Build a `.kvei` for every key in a `.kv`, hashing with `salt`.
-pub fn build_kvei_from_seg(seg: &crate::seg::Seg, salt: u32, out_path: impl AsRef<Path>) -> Result<()> {
+pub fn build_kvei_from_seg(
+    seg: &crate::seg::Seg,
+    salt: u32,
+    out_path: impl AsRef<Path>,
+) -> Result<()> {
     let key_count = seg.words_count() / 2;
     let mut b = KveiBuilder::new(key_count);
     let mut g = seg.getter();

@@ -43,7 +43,10 @@ struct TrieNode {
 
 impl Dictionary {
     fn new(patterns: Vec<Vec<u8>>) -> Dictionary {
-        let mut d = Dictionary { patterns, nodes: vec![TrieNode::default()] };
+        let mut d = Dictionary {
+            patterns,
+            nodes: vec![TrieNode::default()],
+        };
         for pid in 0..d.patterns.len() {
             let mut node = 0u32;
             // borrow patterns bytes via index to satisfy the borrow checker
@@ -169,7 +172,9 @@ pub(crate) fn compress_finish(
     })?;
 
     // Reindex used patterns (only used ones go in the dictionary) and build the codes.
-    let used: Vec<usize> = (0..dict.patterns.len()).filter(|&p| pattern_uses[p] > 0).collect();
+    let used: Vec<usize> = (0..dict.patterns.len())
+        .filter(|&p| pattern_uses[p] > 0)
+        .collect();
     let used_uses: Vec<u64> = used.iter().map(|&p| pattern_uses[p]).collect();
     let pat_codes = build_pattern_dict(&used_uses);
     // orig pattern id -> (code, code_bits)
@@ -196,8 +201,17 @@ pub(crate) fn compress_finish(
     }
 
     // Pass B: write header + dictionaries, then re-cover each word and emit the stream.
-    emit_pass(tmp_path, kv_path, &dict, &pat2code, &pos2code, words_count, empty_words_count,
-        &pattern_dict_bytes, &pos_dict_bytes)
+    emit_pass(
+        tmp_path,
+        kv_path,
+        &dict,
+        &pat2code,
+        &pos2code,
+        words_count,
+        empty_words_count,
+        &pattern_dict_bytes,
+        &pos_dict_bytes,
+    )
 }
 
 /// Emit pass that actually writes the file (separated so the word callback can borrow the
@@ -215,14 +229,21 @@ fn emit_pass(
     pos_dict_bytes: &[u8],
 ) -> Result<()> {
     let mut out = BufWriter::new(File::create(kv_path).map_err(|e| Error::io(kv_path, e))?);
-    out.write_all(&words_count.to_be_bytes()).map_err(|e| Error::io(kv_path, e))?;
-    out.write_all(&empty_words_count.to_be_bytes()).map_err(|e| Error::io(kv_path, e))?;
-    out.write_all(&(pattern_dict_bytes.len() as u64).to_be_bytes()).map_err(|e| Error::io(kv_path, e))?;
-    out.write_all(pattern_dict_bytes).map_err(|e| Error::io(kv_path, e))?;
-    out.write_all(&(pos_dict_bytes.len() as u64).to_be_bytes()).map_err(|e| Error::io(kv_path, e))?;
-    out.write_all(pos_dict_bytes).map_err(|e| Error::io(kv_path, e))?;
+    out.write_all(&words_count.to_be_bytes())
+        .map_err(|e| Error::io(kv_path, e))?;
+    out.write_all(&empty_words_count.to_be_bytes())
+        .map_err(|e| Error::io(kv_path, e))?;
+    out.write_all(&(pattern_dict_bytes.len() as u64).to_be_bytes())
+        .map_err(|e| Error::io(kv_path, e))?;
+    out.write_all(pattern_dict_bytes)
+        .map_err(|e| Error::io(kv_path, e))?;
+    out.write_all(&(pos_dict_bytes.len() as u64).to_be_bytes())
+        .map_err(|e| Error::io(kv_path, e))?;
+    out.write_all(pos_dict_bytes)
+        .map_err(|e| Error::io(kv_path, e))?;
 
-    let pos_code = |pos: u64| -> (u64, u32) { *pos2code.get(&pos).expect("position missing from dict") };
+    let pos_code =
+        |pos: u64| -> (u64, u32) { *pos2code.get(&pos).expect("position missing from dict") };
     let mut code_buf: Vec<u8> = Vec::new();
     let mut literals: Vec<u8> = Vec::new();
     let mut err: Option<Error> = None;
@@ -256,7 +277,10 @@ fn emit_pass(
             }
         }
         bw.flush();
-        if let Err(e) = out.write_all(&code_buf).and_then(|_| out.write_all(&literals)) {
+        if let Err(e) = out
+            .write_all(&code_buf)
+            .and_then(|_| out.write_all(&literals))
+        {
             err = Some(Error::io(kv_path, e));
         }
     })?;

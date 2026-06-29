@@ -39,12 +39,25 @@ impl KvReader {
         let seg = Seg::open_with(kv_path, opts)?;
 
         let bt_path = kv_path.with_extension("bt");
-        let index = if bt_path.exists() { Some(BtreeIndex::open(&bt_path)?) } else { None };
+        let index = if bt_path.exists() {
+            Some(BtreeIndex::open(&bt_path)?)
+        } else {
+            None
+        };
 
         let kvei_path = kv_path.with_extension("kvei");
-        let bloom = if kvei_path.exists() { Some(ExistenceFilter::open(&kvei_path)?) } else { None };
+        let bloom = if kvei_path.exists() {
+            Some(ExistenceFilter::open(&kvei_path)?)
+        } else {
+            None
+        };
 
-        Ok(KvReader { seg, index, bloom, salt: None })
+        Ok(KvReader {
+            seg,
+            index,
+            bloom,
+            salt: None,
+        })
     }
 
     /// The underlying seg data file.
@@ -81,7 +94,9 @@ impl KvReader {
     /// self-validates against real keys (so a wrong salt can never cause a missed key —
     /// it just leaves lookups unaccelerated).
     pub fn enable_bloom(&mut self, salt: Salt) -> bool {
-        let Some(bloom) = &self.bloom else { return false };
+        let Some(bloom) = &self.bloom else {
+            return false;
+        };
         if !bloom.is_accelerating() {
             return false;
         }
@@ -96,7 +111,9 @@ impl KvReader {
         if samples.is_empty() {
             return false;
         }
-        let ok = samples.iter().all(|k| bloom.contains_hash(murmur3_x64_128_h1(k, resolved)));
+        let ok = samples
+            .iter()
+            .all(|k| bloom.contains_hash(murmur3_x64_128_h1(k, resolved)));
         if ok {
             self.salt = Some(resolved);
         }
@@ -126,7 +143,10 @@ impl KvReader {
                         if found.load(Ordering::Relaxed) != u64::MAX {
                             return;
                         }
-                        if samples.iter().all(|k| bloom.contains_hash(murmur3_x64_128_h1(k, salt))) {
+                        if samples
+                            .iter()
+                            .all(|k| bloom.contains_hash(murmur3_x64_128_h1(k, salt)))
+                        {
                             found.fetch_min(salt as u64, Ordering::Relaxed);
                             return;
                         }
@@ -239,7 +259,9 @@ impl KvReader {
 
     /// Iterate every `(key, value)` pair sequentially, in stored (key) order.
     pub fn iter(&self) -> KvIter<'_> {
-        KvIter { getter: self.seg.getter() }
+        KvIter {
+            getter: self.seg.getter(),
+        }
     }
 }
 
@@ -256,7 +278,11 @@ impl Iterator for KvIter<'_> {
             return None;
         }
         let key = self.getter.next();
-        let value = if self.getter.has_next() { self.getter.next() } else { Vec::new() };
+        let value = if self.getter.has_next() {
+            self.getter.next()
+        } else {
+            Vec::new()
+        };
         Some(Ok((key, value)))
     }
 }

@@ -56,12 +56,22 @@ impl EliasFano {
         let lower_mask = if l == 0 { 0 } else { (1u64 << l) - 1 };
         let words_lower = (((count + 1) * l).div_ceil(64) + 1) as usize;
         let words_upper = ((count + 1 + (u >> l)).div_ceil(64)) as usize;
-        let ef = EliasFano { mmap, base, count, l, lower_mask, words_lower, words_upper };
+        let ef = EliasFano {
+            mmap,
+            base,
+            count,
+            l,
+            lower_mask,
+            words_lower,
+            words_upper,
+        };
         // Bounds-check that at least the lower+upper bit regions fit; the trailing
         // jump (select) table is addressed only at valid indices by `get`.
         let need = ef.word_off(words_lower + words_upper);
         if need > ef.mmap.len() {
-            return Err(Error::format("Elias-Fano: data shorter than header implies"));
+            return Err(Error::format(
+                "Elias-Fano: data shorter than header implies",
+            ));
         }
         Ok(ef)
     }

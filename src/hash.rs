@@ -121,8 +121,14 @@ mod tests {
     fn reference_vectors() {
         // Authoritative spaolacci/murmur3 vectors (h1 = first 64-bit half).
         assert_eq!(murmur3_x64_128_h1(b"hello", 0), 0xcbd8_a7b3_41bd_9b02);
-        assert_eq!(murmur3_x64_128_h1(b"hello, world", 0), 0x342f_ac62_3a5e_bc8e);
-        assert_eq!(murmur3_x64_128_h1(b"19 Jan 2038 at 3:14:07 AM", 0), 0xb89e_5988_b737_affc);
+        assert_eq!(
+            murmur3_x64_128_h1(b"hello, world", 0),
+            0x342f_ac62_3a5e_bc8e
+        );
+        assert_eq!(
+            murmur3_x64_128_h1(b"19 Jan 2038 at 3:14:07 AM", 0),
+            0xb89e_5988_b737_affc
+        );
         assert_eq!(murmur3_x64_128_h1(b"hello", 1), 0xa78d_dff5_adae_8d10);
         assert_eq!(murmur3_x64_128_h1(b"hello", 0x2a), 0xc4b8_b3c9_60af_6f08);
         assert_eq!(

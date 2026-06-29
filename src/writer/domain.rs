@@ -52,7 +52,13 @@ impl DomainWriter {
     pub fn create(kv_path: impl AsRef<Path>, opts: DomainOptions) -> Result<DomainWriter> {
         let kv_path = kv_path.as_ref().to_path_buf();
         let seg = SegWriter::create_with(&kv_path, opts.compress)?;
-        Ok(DomainWriter { kv_path, seg, opts, last_key: None, key_count: 0 })
+        Ok(DomainWriter {
+            kv_path,
+            seg,
+            opts,
+            last_key: None,
+            key_count: 0,
+        })
     }
 
     /// Append one `(key, value)` pair. Keys must be strictly increasing.
@@ -97,6 +103,10 @@ impl DomainWriter {
             None => None,
         };
 
-        Ok(DomainPaths { kv: kv_path, bt: bt_path, kvei })
+        Ok(DomainPaths {
+            kv: kv_path,
+            bt: bt_path,
+            kvei,
+        })
     }
 }

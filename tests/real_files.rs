@@ -132,10 +132,17 @@ fn merges_real_files() {
         return;
     }
     let (older, newer) = (&kvs[0], &kvs[1]);
-    eprintln!("merging {} (old) + {} (new)", older.display(), newer.display());
+    eprintln!(
+        "merging {} (old) + {} (new)",
+        older.display(),
+        newer.display()
+    );
 
     // Output range start != 0 so legitimate empty values are preserved.
-    let out = std::env::temp_dir().join(format!("erigon_seg_merge_{}.100-200.kv", std::process::id()));
+    let out = std::env::temp_dir().join(format!(
+        "erigon_seg_merge_{}.100-200.kv",
+        std::process::id()
+    ));
     merge(&[older, newer], &out, MergeOptions::default()).expect("merge");
 
     let r_old = KvReader::open(older).unwrap();
@@ -148,7 +155,11 @@ fn merges_real_files() {
         for kv in src.iter().step_by(617).take(400) {
             let (k, _) = kv.unwrap();
             let expect = r_new.get(&k).unwrap().or(r_old.get(&k).unwrap());
-            assert_eq!(r_out.get(&k).unwrap(), expect, "newest-wins mismatch for a key");
+            assert_eq!(
+                r_out.get(&k).unwrap(),
+                expect,
+                "newest-wins mismatch for a key"
+            );
             checked += 1;
         }
     }
@@ -159,8 +170,15 @@ fn merges_real_files() {
             union.insert(kv.unwrap().0);
         }
     }
-    assert_eq!(r_out.key_count(), union.len() as u64, "merged key_count != union size");
-    eprintln!("merged {} keys, checked {checked} lookups", r_out.key_count());
+    assert_eq!(
+        r_out.key_count(),
+        union.len() as u64,
+        "merged key_count != union size"
+    );
+    eprintln!(
+        "merged {} keys, checked {checked} lookups",
+        r_out.key_count()
+    );
 
     let _ = std::fs::remove_file(&out);
     let _ = std::fs::remove_file(out.with_extension("bt"));
@@ -185,7 +203,15 @@ fn rebuilt_bt_matches_real() {
     let out = std::env::temp_dir().join(format!("erigon_seg_rebuilt_{}.bt", std::process::id()));
 
     // Real files use the legacy layout; rebuild legacy and compare offsets 1:1.
-    build_bt(&kv, &out, BtOptions { layout: BtLayout::Legacy, ..Default::default() }).unwrap();
+    build_bt(
+        &kv,
+        &out,
+        BtOptions {
+            layout: BtLayout::Legacy,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let rebuilt = BtreeIndex::open(&out).expect("open rebuilt .bt");
     let _ = std::fs::remove_file(&out);
 
@@ -193,7 +219,11 @@ fn rebuilt_bt_matches_real() {
     let n = real.key_count();
     // Compare a dense prefix and a strided sweep across the whole file.
     for i in (0..n.min(5000)).chain((0..n).step_by((n / 1000).max(1) as usize)) {
-        assert_eq!(rebuilt.key_offset(i), real.key_offset(i), "offset[{i}] differs");
+        assert_eq!(
+            rebuilt.key_offset(i),
+            real.key_offset(i),
+            "offset[{i}] differs"
+        );
     }
 
     // The rebuilt index must also resolve real keys through a fresh reader.
@@ -246,13 +276,23 @@ fn reads_and_queries_real_file() {
     }
 
     // A synthetic key that cannot exist must be absent.
-    assert!(r.get(b"\xff_erigon_seg_absent_\xff").expect("get").is_none());
+    assert!(
+        r.get(b"\xff_erigon_seg_absent_\xff")
+            .expect("get")
+            .is_none()
+    );
 
     // Bloom: resolve the salt and verify it accelerates without false negatives.
-    if r.existence_filter().map(|f| f.is_accelerating()).unwrap_or(false) {
+    if r.existence_filter()
+        .map(|f| f.is_accelerating())
+        .unwrap_or(false)
+    {
         let salt_file = salt_from_file(dir.join("salt-state.txt"));
         let found = r.find_salt(8);
-        assert!(found.is_some(), "find_salt should recover a salt for a real bloom");
+        assert!(
+            found.is_some(),
+            "find_salt should recover a salt for a real bloom"
+        );
         if let (Some(f), Some(s)) = (found, salt_file) {
             assert_eq!(f, s, "brute-forced salt disagrees with salt-state.txt");
         }
@@ -264,7 +304,10 @@ fn reads_and_queries_real_file() {
         // No false negatives: every real key must be reported present.
         let filter = r.existence_filter().unwrap();
         for (k, _) in pairs.iter().step_by(50) {
-            assert!(filter.contains_hash(murmur3_x64_128_h1(k, salt)), "bloom false-negative");
+            assert!(
+                filter.contains_hash(murmur3_x64_128_h1(k, salt)),
+                "bloom false-negative"
+            );
         }
 
         // Lookups remain correct with the bloom enabled.
