@@ -1,5 +1,11 @@
 # erigon-seg
 
+[![CI](https://github.com/KarpelesLab/erigon-seg/actions/workflows/ci.yml/badge.svg)](https://github.com/KarpelesLab/erigon-seg/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/erigon-seg.svg)](https://crates.io/crates/erigon-seg)
+[![docs.rs](https://img.shields.io/docsrs/erigon-seg)](https://docs.rs/erigon-seg)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.88-blue.svg)](Cargo.toml)
+
 A Rust library for the Erigon 3 **seg** state file format. It **reads, queries, writes,
 and merges** the file triple Erigon writes for each domain snapshot.
 
