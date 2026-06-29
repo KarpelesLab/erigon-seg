@@ -3,7 +3,7 @@
 [![CI](https://github.com/KarpelesLab/erigon-seg/actions/workflows/ci.yml/badge.svg)](https://github.com/KarpelesLab/erigon-seg/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/erigon-seg.svg)](https://crates.io/crates/erigon-seg)
 [![docs.rs](https://img.shields.io/docsrs/erigon-seg)](https://docs.rs/erigon-seg)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue.svg)](Cargo.toml)
 
 A Rust library for the Erigon 3 **seg** state file format. It **reads, queries, writes,
@@ -93,4 +93,4 @@ reproduce newest-wins semantics, and compressed output is competitive with erigo
 
 ## License
 
-MIT OR Apache-2.0
+MIT — see [LICENSE](LICENSE).
