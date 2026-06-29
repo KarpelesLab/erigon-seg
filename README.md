@@ -89,7 +89,7 @@ Read, query, write, merge, and pattern compression are all implemented and verif
 against real Erigon v1.1 files: re-encoding a real `.kv` round-trips byte-exact (with and
 without compression), a rebuilt `.bt` matches the real index offset-for-offset, merges
 reproduce newest-wins semantics, and compressed output is competitive with erigon's own
-(~81% the size on a sample `v1.1-accounts` file). See [ROADMAP.md](ROADMAP.md).
+(~81% the size on a sample `v1.1-accounts` file).
 
 ## License
 

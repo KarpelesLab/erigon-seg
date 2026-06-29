@@ -2,7 +2,7 @@
 //!
 //! Built from shared primitives ([`bitwriter`], [`huffman`], [`ef_builder`]) up through
 //! the seg `.kv` writer, the `.bt` and `.kvei` builders, the combined [`DomainWriter`],
-//! and [`merge`]. See `ROADMAP.md` for the staged design.
+//! and [`merge`].
 
 mod bitwriter;
 mod bt_writer;
