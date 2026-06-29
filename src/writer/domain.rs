@@ -22,6 +22,9 @@ pub struct DomainOptions {
     /// If set, a `.kvei` bloom filter is built using this salt; if `None`, no `.kvei` is
     /// produced.
     pub salt: Option<u32>,
+    /// Whether to pattern-compress the `.kv` (smaller output, extra passes). Default
+    /// `false` (no-pattern fast path).
+    pub compress: bool,
 }
 
 /// Paths written by [`DomainWriter::finish`].
@@ -48,7 +51,7 @@ impl DomainWriter {
     /// Create a writer that will produce `kv_path` plus sibling `.bt`/`.kvei` files.
     pub fn create(kv_path: impl AsRef<Path>, opts: DomainOptions) -> Result<DomainWriter> {
         let kv_path = kv_path.as_ref().to_path_buf();
-        let seg = SegWriter::create(&kv_path)?;
+        let seg = SegWriter::create_with(&kv_path, opts.compress)?;
         Ok(DomainWriter { kv_path, seg, opts, last_key: None, key_count: 0 })
     }
 

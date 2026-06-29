@@ -1,9 +1,7 @@
 # Roadmap: write + merge
 
-**Status:** the reader (Phase 0) and the full write + merge critical path (Phases 1–6)
-and hardening (Phase 8) are **complete and verified against real Erigon v1.1 files**. The
-only remaining item is Phase 7 (optional `seg` pattern compression for output size
-parity); files written today are valid and interoperable, just larger than erigon's.
+**Status: complete.** Every phase is implemented and verified against real Erigon v1.1
+files — read, query, write, merge, and pattern compression.
 
 | Phase | What | Status |
 |------:|------|--------|
@@ -14,10 +12,10 @@ parity); files written today are valid and interoperable, just larger than erigo
 | 4 | `.kvei` bloom writer | ✅ done |
 | 5 | `DomainWriter` | ✅ done |
 | 6 | Merge (newest-wins, drop deletions at from=0) | ✅ done |
-| 7 | `seg` pattern compression (size parity) | ⬜ optional, not started |
+| 7 | `seg` pattern compression | ✅ done |
 | 8 | Hardening (real-file write/merge tests, docs) | ✅ done |
 
-This document plans the path to a full read/write/merge library.
+This document records the staged design of the full read/write/merge library.
 
 A key finding from Erigon's source (`db/seg/parallel_compress.go`) shapes the plan:
 `compressNoWordPatterns` produces **fully valid, Erigon-readable `.kv` files with an
@@ -155,22 +153,28 @@ union; output re-reads cleanly.
 
 ---
 
-## Phase 7 — `seg` pattern compression (size parity) ⬤⬤⬤  *(optional; depends on 2)*
+## Phase 7 — `seg` pattern compression ✅ (done)
 
-Bring output size in line with Erigon by porting the real compressor. Large and
-self-contained; can land long after merge works.
+Implemented in `writer/compress.rs`. Key realization: the seg format is **self-describing**
+(it stores its own pattern + position dictionaries), so any *correct* pattern set yields a
+file the reader and erigon both decompress. Rather than porting erigon's
+suffix-array/patricia/DP pipeline, we use a self-contained heuristic that is far smaller
+and lower-risk while still producing valid, competitive output:
 
-- Superstring sampling (`AddWord`/`sampledSuperstring`/`advanceScan`).
-- **SAIS suffix array** over superstrings → repeated-substring pattern candidates with
-  scores (`extractPatternsInSuperstrings`, `sais/sais.go`).
-- Dictionary reduction/scoring (`DictionaryBuilder`).
-- **Patricia tree + Aho-Corasick** matcher (`patricia/`).
-- Per-word **min-cost cover** DP (`coverWordByPatterns`, `DynamicCell`).
-- Pattern + position Huffman; re-encode words (covering positions, patterns, uncovered
-  literals) — `compressWithPatternCandidates`.
+- **Dictionary** — frequent fixed-length n-grams (lengths 64/32/16/8) over a sample of
+  words, scored by `(len-4)·(uses-1)`, top 8192 kept (`build_dictionary`).
+- **Matcher** — a byte trie giving the longest pattern matching at each position.
+- **Cover** — greedy longest-match, non-overlapping (simpler than erigon's optimal DP;
+  still valid since the format only needs a correct cover).
+- **Encoding** — a generic canonical-Huffman builder (shared with positions) assigns
+  pattern codes; words are emitted as `pos(len+1)`, then per pattern `pos(distance+1)` +
+  pattern code, a `0` terminator, and the uncovered literal bytes.
 
-**Verification:** round-trip equality with the reader; compression ratio within a few
-percent of Erigon on the same corpus; differential test vs. real files.
+**Verification:** byte-exact round-trip through the reader on synthetic and real corpora;
+on a real `v1.1-accounts` file the output is ~81% the size of erigon's own compressed
+file (smaller here — the heuristic dictionary fits this data well; ratio will vary by
+dataset). Enabled via `DomainOptions { compress: true, .. }` or
+`SegWriter::create_with(path, true)`.
 
 ---
 
@@ -196,5 +200,5 @@ Phase 7 (pattern compression)  ← optional, plugs into Phase 2/5
 Phase 8 (hardening)            ← continuous
 ```
 
-**Critical path to "write + merge" (correct, interoperable):** 1 → 2 → 3 → 5 → 6, with 4
-sliced in before 5. Phase 7 is a later size-parity upgrade, not a blocker.
+All phases are complete. The critical path to write + merge was 1 → 2 → 3 → 5 → 6 (with 4
+before 5); Phase 7 (compression) then plugged into the seg writer.

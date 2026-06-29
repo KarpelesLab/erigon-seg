@@ -29,13 +29,24 @@ pub struct SegWriter {
     /// `position -> uses` frequency map for the Huffman dictionary, accumulated as words
     /// are added (a word of length `l` contributes one `l+1` and one terminator `0`).
     pos_uses: HashMap<u64, u64>,
+    /// When true, [`finish`](SegWriter::finish) builds a pattern dictionary and emits a
+    /// compressed file; otherwise the no-pattern fast path is used.
+    compress: bool,
     finished: bool,
 }
 
 impl SegWriter {
-    /// Create a writer that will produce `kv_path`. A sibling temporary file
-    /// (`<kv_path>.words.tmp`) holds buffered words until [`finish`](SegWriter::finish).
+    /// Create a writer that will produce `kv_path` (no pattern compression). A sibling
+    /// temporary file (`<kv_path>.words.tmp`) holds buffered words until
+    /// [`finish`](SegWriter::finish).
     pub fn create(kv_path: impl AsRef<Path>) -> Result<SegWriter> {
+        SegWriter::create_with(kv_path, false)
+    }
+
+    /// Like [`create`](SegWriter::create) but choosing whether to pattern-compress the
+    /// output. Compression produces a smaller, still erigon-readable file at the cost of
+    /// extra passes over the buffered words.
+    pub fn create_with(kv_path: impl AsRef<Path>, compress: bool) -> Result<SegWriter> {
         let kv_path = kv_path.as_ref().to_path_buf();
         let tmp_path = with_suffix(&kv_path, ".words.tmp");
         let tmp = BufWriter::new(File::create(&tmp_path).map_err(|e| Error::io(&tmp_path, e))?);
@@ -46,6 +57,7 @@ impl SegWriter {
             words_count: 0,
             empty_words_count: 0,
             pos_uses: HashMap::new(),
+            compress,
             finished: false,
         })
     }
@@ -75,6 +87,17 @@ impl SegWriter {
     pub fn finish(mut self) -> Result<()> {
         self.finished = true;
         self.tmp.flush().map_err(|e| Error::io(&self.tmp_path, e))?;
+
+        if self.compress {
+            super::compress::compress_finish(
+                &self.tmp_path,
+                &self.kv_path,
+                self.words_count,
+                self.empty_words_count,
+            )?;
+            let _ = std::fs::remove_file(&self.tmp_path);
+            return Ok(());
+        }
 
         // Build the position dictionary and the (depth, pos) serialization.
         let mut pairs: Vec<(u64, u64)> = self.pos_uses.iter().map(|(&p, &u)| (p, u)).collect();

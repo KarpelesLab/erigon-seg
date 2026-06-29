@@ -6,6 +6,7 @@
 
 mod bitwriter;
 mod bt_writer;
+mod compress;
 mod domain;
 mod ef_builder;
 mod huffman;
@@ -224,6 +225,48 @@ mod tests {
                 let _ = std::fs::remove_file(dir.join(format!("erigon_seg_{}_{stem}.{ext}", std::process::id())));
             }
         }
+    }
+
+    #[test]
+    fn compressed_seg_roundtrips_and_shrinks() {
+        use super::seg_writer::SegWriter;
+        // Repetitive content so the dictionary finds real patterns.
+        let words: Vec<Vec<u8>> = (0..4000u32)
+            .map(|i| {
+                format!("account:{:04}:balance=0x0000000000000000000000000000000000:nonce={}", i % 64, i % 7)
+                    .into_bytes()
+            })
+            .collect();
+
+        let plain = scratch("plain.kv");
+        let comp = scratch("comp.kv");
+        let mut wp = SegWriter::create(&plain).unwrap();
+        let mut wc = SegWriter::create_with(&comp, true).unwrap();
+        for w in &words {
+            wp.add_word(w).unwrap();
+            wc.add_word(w).unwrap();
+        }
+        wp.finish().unwrap();
+        wc.finish().unwrap();
+
+        // Round-trip equality for the compressed file.
+        let seg = Seg::open(&comp).unwrap();
+        assert_eq!(seg.words_count(), words.len() as u64);
+        let mut g = seg.getter();
+        for (i, want) in words.iter().enumerate() {
+            assert!(g.has_next(), "short at {i}");
+            assert_eq!(&g.next(), want, "compressed word {i} mismatch");
+        }
+        assert!(!g.has_next());
+
+        // It should be meaningfully smaller than the no-pattern file.
+        let plain_sz = std::fs::metadata(&plain).unwrap().len();
+        let comp_sz = std::fs::metadata(&comp).unwrap().len();
+        assert!(comp_sz < plain_sz, "compressed {comp_sz} not < plain {plain_sz}");
+        eprintln!("compressed {comp_sz} vs plain {plain_sz} ({:.1}% )", 100.0 * comp_sz as f64 / plain_sz as f64);
+
+        let _ = std::fs::remove_file(&plain);
+        let _ = std::fs::remove_file(&comp);
     }
 
     #[test]

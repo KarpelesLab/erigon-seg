@@ -78,6 +78,47 @@ fn rewrites_real_kv_roundtrip() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// Re-encode a real `.kv` *with pattern compression* and confirm byte-exact round-trip;
+/// report size vs erigon's own compressed file.
+#[test]
+fn recompresses_real_kv_roundtrip() {
+    let Some(dir) = test_dir() else {
+        eprintln!("ERIGON_SEG_TEST_DIR not set; skipping");
+        return;
+    };
+    let Some(kv) = smallest_kv(&dir) else { return };
+    eprintln!("recompressing {}", kv.display());
+
+    let seg = Seg::open(&kv).expect("open real .kv");
+    let out = std::env::temp_dir().join(format!("erigon_seg_recomp_{}.kv", std::process::id()));
+    let mut w = SegWriter::create_with(&out, true).unwrap();
+    let mut g = seg.getter();
+    while g.has_next() {
+        let word = g.next();
+        w.add_word(&word).unwrap();
+    }
+    w.finish().unwrap();
+
+    let seg2 = Seg::open(&out).expect("open recompressed .kv");
+    assert_eq!(seg2.words_count(), seg.words_count());
+    let (mut a, mut b) = (seg.getter(), seg2.getter());
+    let mut n = 0u64;
+    while a.has_next() {
+        assert!(b.has_next(), "short at {n}");
+        assert_eq!(a.next(), b.next(), "word {n} differs after recompress");
+        n += 1;
+    }
+    assert!(!b.has_next());
+
+    let real_sz = std::fs::metadata(&kv).unwrap().len();
+    let ours_sz = std::fs::metadata(&out).unwrap().len();
+    eprintln!(
+        "recompressed OK: {n} words; ours {ours_sz} vs erigon {real_sz} ({:.1}% of erigon)",
+        100.0 * ours_sz as f64 / real_sz as f64
+    );
+    let _ = std::fs::remove_file(&out);
+}
+
 /// Merge two real `.kv` files and verify newest-wins + union against the source readers.
 #[test]
 fn merges_real_files() {
