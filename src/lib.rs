@@ -73,4 +73,5 @@ pub use error::{Error, Result};
 pub use hash::murmur3_x64_128_h1;
 pub use reader::{KvIter, KvReader};
 pub use salt::{Salt, salt_from_file};
-pub use seg::{Getter, Seg};
+pub use seg::{Getter, OpenOptions, Seg};
+pub use writer::{BtLayout, BtOptions, DEFAULT_BTREE_M, SegWriter, build_bt, build_bt_from_seg};

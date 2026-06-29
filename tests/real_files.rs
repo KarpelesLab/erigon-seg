@@ -9,7 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
-use erigon_seg::{KvReader, Salt, murmur3_x64_128_h1, salt_from_file};
+use erigon_seg::{
+    BtLayout, BtOptions, BtreeIndex, KvReader, Salt, Seg, build_bt, murmur3_x64_128_h1,
+    salt_from_file,
+};
 
 /// Return the test dir from the env, or `None` to skip.
 fn test_dir() -> Option<PathBuf> {
@@ -27,6 +30,49 @@ fn smallest_kv(dir: &Path) -> Option<PathBuf> {
         .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (m.len(), p)))
         .min_by_key(|(len, _)| *len)
         .map(|(_, p)| p)
+}
+
+/// Rebuild a `.bt` from a real `.kv` and confirm every offset matches the real `.bt`.
+#[test]
+fn rebuilt_bt_matches_real() {
+    let Some(dir) = test_dir() else {
+        eprintln!("ERIGON_SEG_TEST_DIR not set; skipping");
+        return;
+    };
+    let Some(kv) = smallest_kv(&dir) else { return };
+    let real_bt = kv.with_extension("bt");
+    if !real_bt.exists() {
+        eprintln!("no sibling .bt for {}; skipping", kv.display());
+        return;
+    }
+    eprintln!("rebuilding .bt for {}", kv.display());
+
+    let real = BtreeIndex::open(&real_bt).expect("open real .bt");
+    let out = std::env::temp_dir().join(format!("erigon_seg_rebuilt_{}.bt", std::process::id()));
+
+    // Real files use the legacy layout; rebuild legacy and compare offsets 1:1.
+    build_bt(&kv, &out, BtOptions { layout: BtLayout::Legacy, ..Default::default() }).unwrap();
+    let rebuilt = BtreeIndex::open(&out).expect("open rebuilt .bt");
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(rebuilt.key_count(), real.key_count(), "key_count");
+    let n = real.key_count();
+    // Compare a dense prefix and a strided sweep across the whole file.
+    for i in (0..n.min(5000)).chain((0..n).step_by((n / 1000).max(1) as usize)) {
+        assert_eq!(rebuilt.key_offset(i), real.key_offset(i), "offset[{i}] differs");
+    }
+
+    // The rebuilt index must also resolve real keys through a fresh reader.
+    let seg = Seg::open(&kv).unwrap();
+    let mut g = seg.getter();
+    for i in (0..n).step_by((n / 200).max(1) as usize) {
+        let real_key = {
+            g.reset(real.key_offset(i).unwrap());
+            g.next()
+        };
+        g.reset(rebuilt.key_offset(i).unwrap());
+        assert_eq!(g.next(), real_key, "key at di={i}");
+    }
 }
 
 #[test]

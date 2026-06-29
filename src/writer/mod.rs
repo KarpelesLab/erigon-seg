@@ -5,10 +5,12 @@
 //! and [`merge`]. See `ROADMAP.md` for the staged design.
 
 mod bitwriter;
+mod bt_writer;
 mod ef_builder;
 mod huffman;
 mod seg_writer;
 
+pub use bt_writer::{BtLayout, BtOptions, DEFAULT_BTREE_M, build_bt, build_bt_from_seg};
 pub use seg_writer::SegWriter;
 
 #[cfg(test)]
@@ -42,6 +44,57 @@ mod tests {
             assert_eq!(&g.next(), want, "word {i} mismatch");
         }
         assert!(!g.has_next(), "extra words after {}", words.len());
+    }
+
+    fn write_kv(path: &std::path::Path, pairs: &[(Vec<u8>, Vec<u8>)]) {
+        let mut w = SegWriter::create(path).unwrap();
+        for (k, v) in pairs {
+            w.add_word(k).unwrap();
+            w.add_word(v).unwrap();
+        }
+        w.finish().unwrap();
+    }
+
+    fn bt_check(layout: super::BtLayout) {
+        use crate::{BtreeIndex, KvReader};
+        let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..1000u32)
+            .map(|i| (format!("key{i:08}").into_bytes(), format!("val-{i}").into_bytes()))
+            .collect();
+        // Keys are already sorted lexicographically by the zero-padded format.
+        let base = scratch(&format!("bt_{layout:?}"));
+        let kv = base.with_extension("kv");
+        let bt = base.with_extension("bt");
+        write_kv(&kv, &pairs);
+        super::build_bt(&kv, &bt, super::BtOptions { layout, m: 32 }).unwrap();
+
+        // Direct index check: each key_offset(i) decompresses to key[i].
+        let seg = Seg::open(&kv).unwrap();
+        let idx = BtreeIndex::open(&bt).unwrap();
+        assert_eq!(idx.key_count(), pairs.len() as u64);
+        let mut g = seg.getter();
+        for (i, (k, _)) in pairs.iter().enumerate() {
+            g.reset(idx.key_offset(i as u64).unwrap());
+            assert_eq!(&g.next(), k, "key_offset({i}) mismatch ({layout:?})");
+        }
+        if layout == super::BtLayout::Footer {
+            assert_eq!(idx.m(), Some(32));
+        }
+
+        // End-to-end through KvReader.get on every key + a few misses.
+        let r = KvReader::open(&kv).unwrap();
+        for (k, v) in &pairs {
+            assert_eq!(r.get(k).unwrap().as_deref(), Some(v.as_slice()), "get {k:?} ({layout:?})");
+        }
+        assert!(r.get(b"key99999999").unwrap().is_none());
+        assert!(r.get(b"aaa").unwrap().is_none());
+        let _ = std::fs::remove_file(&kv);
+        let _ = std::fs::remove_file(&bt);
+    }
+
+    #[test]
+    fn bt_writer_both_layouts() {
+        bt_check(super::BtLayout::Legacy);
+        bt_check(super::BtLayout::Footer);
     }
 
     #[test]

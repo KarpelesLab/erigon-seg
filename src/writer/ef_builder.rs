@@ -25,8 +25,8 @@ pub(crate) struct EfBuilder {
 #[inline]
 fn jump_size_words(count_plus_1: u64) -> u64 {
     let mut size = (count_plus_1 / SUPERQ) * SUPERQ_SIZE;
-    if count_plus_1 % SUPERQ != 0 {
-        size += 1 + (((count_plus_1 % SUPERQ) + Q - 1) / Q + 3) / 2;
+    if !count_plus_1.is_multiple_of(SUPERQ) {
+        size += 1 + ((count_plus_1 % SUPERQ).div_ceil(Q) + 3) / 2;
     }
     size
 }

@@ -363,6 +363,17 @@ impl Seg {
         self.page_values_count
     }
 
+    /// Total mapped file length in bytes — a safe over-estimate of the maximum word
+    /// offset, suitable as the `max_offset` bound when building a `.bt` index.
+    pub fn len(&self) -> usize {
+        self.mmap.len()
+    }
+
+    /// Whether the file maps to zero bytes.
+    pub fn is_empty(&self) -> bool {
+        self.mmap.is_empty()
+    }
+
     /// Create a cursor positioned at the start of the words region.
     pub fn getter(&self) -> Getter<'_> {
         Getter {
@@ -400,6 +411,51 @@ impl<'a> Getter<'a> {
     #[inline]
     pub fn has_next(&self) -> bool {
         (self.data_p as usize) < self.data.len()
+    }
+
+    /// Byte offset of the cursor within the words region. Valid (byte-aligned) at word
+    /// boundaries — i.e. immediately after [`reset`](Self::reset), [`next`](Self::next),
+    /// or [`skip`](Self::skip). This is the value the `.bt` index stores per key.
+    #[inline]
+    pub fn offset(&self) -> u64 {
+        self.data_p
+    }
+
+    /// Advance past the word at the current offset without materializing it, returning
+    /// its length. Port of erigon `Getter.Skip`; far cheaper than [`next`](Self::next)
+    /// when only positions/offsets are needed (e.g. building an index).
+    pub fn skip(&mut self) -> u64 {
+        let word_len = self.next_pos(true).wrapping_sub(1); // -1: 0 is the terminator
+        if word_len == 0 {
+            if self.data_bit > 0 {
+                self.data_p += 1;
+                self.data_bit = 0;
+            }
+            return 0;
+        }
+        let mut add = 0u64;
+        let mut buf_pos: usize = 0;
+        let mut last_uncovered: usize = 0;
+        loop {
+            let pos = self.next_pos(false);
+            if pos == 0 {
+                break;
+            }
+            buf_pos += pos as usize - 1;
+            if buf_pos > last_uncovered {
+                add += (buf_pos - last_uncovered) as u64;
+            }
+            last_uncovered = buf_pos + self.next_pattern().len();
+        }
+        if self.data_bit > 0 {
+            self.data_p += 1;
+            self.data_bit = 0;
+        }
+        if word_len as usize > last_uncovered {
+            add += word_len - last_uncovered as u64;
+        }
+        self.data_p += add;
+        word_len
     }
 
     fn next_pos(&mut self, clean: bool) -> u64 {
