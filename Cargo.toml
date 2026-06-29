@@ -1,0 +1,15 @@
+[package]
+name = "erigon-seg"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Reader (and, later, writer) for the Erigon 3 seg state file format: .kv (seg-compressed words), .bt (B-tree / Elias-Fano index), and .kvei (existence/bloom filter)."
+license = "MIT OR Apache-2.0"
+repository = ""
+keywords = ["erigon", "ethereum", "seg", "snapshot", "decompress"]
+categories = ["encoding", "filesystem"]
+
+[dependencies]
+memmap2 = "0.9"
+
+[dev-dependencies]
