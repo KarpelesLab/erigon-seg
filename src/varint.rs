@@ -1,6 +1,49 @@
 //! Go-compatible `binary.Uvarint` decoding (LEB128 unsigned), used by the seg
 //! pattern/position dictionaries.
 
+use std::io::{self, Read};
+
+/// Append `v` as a Go `binary.PutUvarint` (LEB128 unsigned) to `out`.
+pub(crate) fn put_uvarint(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+/// Read one LEB128 uvarint from a stream. Returns `Ok(None)` cleanly at end of input
+/// (before any byte is read), `Ok(Some(v))` on success.
+pub(crate) fn read_uvarint<R: Read>(r: &mut R) -> io::Result<Option<u64>> {
+    let mut x = 0u64;
+    let mut s = 0u32;
+    let mut byte = [0u8; 1];
+    for i in 0..10 {
+        match r.read(&mut byte) {
+            Ok(0) => {
+                return if i == 0 {
+                    Ok(None) // clean EOF at a record boundary
+                } else {
+                    Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated uvarint"))
+                };
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+        let c = byte[0];
+        if c < 0x80 {
+            if i == 9 && c > 1 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "uvarint overflow"));
+            }
+            return Ok(Some(x | (c as u64) << s));
+        }
+        x |= ((c & 0x7f) as u64) << s;
+        s += 7;
+    }
+    Err(io::Error::new(io::ErrorKind::InvalidData, "uvarint overflow"))
+}
+
 /// Decode a Go `binary.Uvarint`: LEB128 unsigned. Returns `(value, bytes_read)`,
 /// or `(0, 0)` on overflow/truncation.
 pub(crate) fn uvarint(b: &[u8]) -> (u64, usize) {

@@ -64,6 +64,7 @@ mod salt;
 mod seg;
 mod util;
 mod varint;
+mod writer;
 
 pub use bloom::ExistenceFilter;
 pub use btree::BtreeIndex;
