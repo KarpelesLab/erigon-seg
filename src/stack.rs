@@ -60,11 +60,7 @@ impl KvStack {
     /// stack. Use `name_filter` to select a single domain (e.g. `"accounts"`) so files
     /// from different domains in the same directory are not mixed. Errors if no matching
     /// `.kv` file is found.
-    pub fn open_dir(
-        dir: impl AsRef<Path>,
-        name_filter: &str,
-        salt: Salt,
-    ) -> Result<KvStack> {
+    pub fn open_dir(dir: impl AsRef<Path>, name_filter: &str, salt: Salt) -> Result<KvStack> {
         let dir = dir.as_ref();
         let mut kvs: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|e| Error::format(format!("read_dir {}: {e}", dir.display())))?

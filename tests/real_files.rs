@@ -212,7 +212,9 @@ fn kvstack_newest_wins() {
     });
     let refs: Vec<KvReader> = ordered.iter().map(|p| KvReader::open(p).unwrap()).collect();
 
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
     let salt = salt_from_file(dir.join("salt-state.txt"));
     let chosen = salt.map(Salt::Known).unwrap_or(Salt::Find(threads));
     let stack = KvStack::open(&kvs, chosen).expect("open stack");
