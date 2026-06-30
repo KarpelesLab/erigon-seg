@@ -1,6 +1,6 @@
 [package]
 name = "erigon-seg"
-version = "2.0.0"
+version = "1.0.1"
 edition = "2024"
 rust-version = "1.88"
 description = "Read, query, write, and merge the Erigon 3 seg state file format: .kv (seg-compressed words), .bt (B-tree / Elias-Fano index), and .kvei (existence/bloom filter)."
