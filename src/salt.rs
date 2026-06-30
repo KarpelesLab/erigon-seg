@@ -9,6 +9,7 @@ use std::path::Path;
 
 /// How to obtain the `.kvei` index salt.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum Salt {
     /// No salt: do not use the bloom filter. Lookups stay correct (exact `.bt` search),
     /// just without the negative-lookup speedup.
