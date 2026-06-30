@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1](https://github.com/KarpelesLab/erigon-seg/compare/v1.0.0...v1.0.1) - 2026-06-30
+
+### Added
+
+- add KvStack multi-file stack, Salt::None, KvReader bloom_active/name
+
+### Other
+
+- cargo fmt
+- mark Salt #[non_exhaustive]
+
 ### Added
 
 - `KvStack`: a newest-wins stack of seg files spanning a step range, with `get`
