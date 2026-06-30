@@ -22,6 +22,8 @@ pub struct KvReader {
     bloom: Option<ExistenceFilter>,
     /// Active salt: `Some` only once a bloom has been validated via [`enable_bloom`].
     salt: Option<u32>,
+    /// The `.kv` file's base name (e.g. `v1.1-accounts.0-1024.kv`), for display.
+    name: String,
 }
 
 impl KvReader {
@@ -52,12 +54,29 @@ impl KvReader {
             None
         };
 
+        let name = kv_path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
         Ok(KvReader {
             seg,
             index,
             bloom,
             salt: None,
+            name,
         })
+    }
+
+    /// The `.kv` file's base name (e.g. `v1.1-accounts.0-1024.kv`).
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Whether the bloom filter is active for lookups — i.e. a `.kvei` is present and a
+    /// salt has been validated against real keys via [`enable_bloom`](KvReader::enable_bloom).
+    pub fn bloom_active(&self) -> bool {
+        self.salt.is_some()
     }
 
     /// The underlying seg data file.
@@ -101,6 +120,7 @@ impl KvReader {
             return false;
         }
         let resolved = match salt {
+            Salt::None => return false,
             Salt::Known(s) => s,
             Salt::Find(threads) => match self.find_salt(threads) {
                 Some(s) => s,

@@ -14,6 +14,10 @@
 //! This crate currently implements **reading and querying**. Writing and merging are
 //! planned as later additions.
 //!
+//! A domain's state usually spans several files covering successive step ranges, where a
+//! newer file overrides keys carried by an older one. [`KvStack`] wraps an ordered set of
+//! [`KvReader`]s and resolves point lookups newest-first so overrides win.
+//!
 //! # Quick start
 //!
 //! ```no_run
@@ -62,6 +66,7 @@ mod hash;
 mod reader;
 mod salt;
 mod seg;
+mod stack;
 mod util;
 mod varint;
 mod writer;
@@ -74,6 +79,7 @@ pub use hash::murmur3_x64_128_h1;
 pub use reader::{KvIter, KvReader};
 pub use salt::{Salt, salt_from_file};
 pub use seg::{Getter, OpenOptions, Seg};
+pub use stack::KvStack;
 pub use writer::{
     BtLayout, BtOptions, DEFAULT_BTREE_M, DomainOptions, DomainPaths, DomainWriter, KveiBuilder,
     MergeOptions, SegWriter, build_bt, build_bt_from_seg, build_kvei, build_kvei_from_seg, merge,

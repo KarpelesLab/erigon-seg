@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use erigon_seg::{
-    BtLayout, BtOptions, BtreeIndex, KvReader, MergeOptions, Salt, Seg, SegWriter, build_bt, merge,
-    murmur3_x64_128_h1, salt_from_file,
+    BtLayout, BtOptions, BtreeIndex, KvReader, KvStack, MergeOptions, Salt, Seg, SegWriter,
+    build_bt, merge, murmur3_x64_128_h1, salt_from_file,
 };
 
 /// Return the test dir from the env, or `None` to skip.
@@ -182,6 +182,64 @@ fn merges_real_files() {
 
     let _ = std::fs::remove_file(&out);
     let _ = std::fs::remove_file(out.with_extension("bt"));
+}
+
+/// Stack several real `.kv` files newest-wins and confirm `KvStack::get` agrees with
+/// querying the underlying readers in reverse order, plus salt/bloom_count plumbing.
+#[test]
+fn kvstack_newest_wins() {
+    let Some(dir) = test_dir() else {
+        eprintln!("ERIGON_SEG_TEST_DIR not set; skipping");
+        return;
+    };
+    let kvs = smallest_kvs(&dir, 3);
+    if kvs.len() < 2 {
+        eprintln!("need >=2 .kv files; skipping");
+        return;
+    }
+    eprintln!("stacking {} files", kvs.len());
+
+    // Reference readers (newest first), ordered by the same step-range key the stack uses.
+    let mut ordered = kvs.clone();
+    ordered.sort_by_key(|p| {
+        let n = p.file_name().unwrap().to_string_lossy().into_owned();
+        n.split('.')
+            .find_map(|s| {
+                s.split_once('-')
+                    .and_then(|(a, b)| Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?)))
+            })
+            .unwrap_or((0, 0))
+    });
+    let refs: Vec<KvReader> = ordered.iter().map(|p| KvReader::open(p).unwrap()).collect();
+
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let salt = salt_from_file(dir.join("salt-state.txt"));
+    let chosen = salt.map(Salt::Known).unwrap_or(Salt::Find(threads));
+    let stack = KvStack::open(&kvs, chosen).expect("open stack");
+
+    assert_eq!(stack.len(), kvs.len());
+    if let (Some(file_salt), Some(stack_salt)) = (salt, stack.salt()) {
+        assert_eq!(stack_salt, file_salt, "stack salt disagrees with salt file");
+    }
+    eprintln!(
+        "stack salt = {:?}, bloom_count = {}/{}",
+        stack.salt().map(|s| format!("{s:#010x}")),
+        stack.bloom_count(),
+        stack.len()
+    );
+
+    // For a spread of keys taken from every file, the stack must return the value from the
+    // newest file that has the key (refs queried newest-first).
+    let mut checked = 0u64;
+    for src in &refs {
+        for kv in src.iter().step_by(997).take(300) {
+            let (k, _) = kv.unwrap();
+            let expect = refs.iter().rev().find_map(|r| r.get(&k).unwrap());
+            assert_eq!(stack.get(&k).unwrap(), expect, "stack newest-wins mismatch");
+            checked += 1;
+        }
+    }
+    eprintln!("checked {checked} stack lookups");
 }
 
 /// Rebuild a `.bt` from a real `.kv` and confirm every offset matches the real `.bt`.
