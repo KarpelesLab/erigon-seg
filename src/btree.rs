@@ -30,7 +30,7 @@ use memmap2::Mmap;
 
 use crate::eliasfano::EliasFano;
 use crate::error::{Error, Result};
-use crate::util::{Advice, advise_mmap, mmap_file, preload_mmap};
+use crate::util::{Advice, advise_mmap, lock_mmap, mmap_file, preload_mmap, unlock_mmap};
 
 /// The fixed footer anchor is 16 bytes: `footer_len:u32 | flags:u16 | version:u16 | magic:u64`.
 const ANCHOR_LEN: usize = 16;
@@ -280,12 +280,12 @@ impl BtreeIndex {
     /// Pin the whole `.bt` in RAM with `mlock`. See
     /// [`KvReader::lock_index`](crate::KvReader::lock_index) for the caveats.
     pub fn lock(&self) -> std::io::Result<()> {
-        self.mmap.lock()
+        lock_mmap(&self.mmap)
     }
 
     /// Release an [`mlock`](BtreeIndex::lock).
     pub fn unlock(&self) -> std::io::Result<()> {
-        self.mmap.unlock()
+        unlock_mmap(&self.mmap)
     }
 
     /// Borrow the underlying Elias-Fano offset array, if the index is non-empty.

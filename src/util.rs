@@ -68,6 +68,40 @@ pub(crate) fn preload_mmap(mmap: &Mmap) -> usize {
     len
 }
 
+/// Pin a mapping in RAM with `mlock`.
+///
+/// Unlike [`advise_mmap`], the non-Unix path reports `Unsupported` rather than pretending
+/// to succeed: advice is a hint whose loss only costs performance, but locking is a
+/// guarantee the caller may be relying on, so silently not doing it would be a lie.
+#[cfg(unix)]
+pub(crate) fn lock_mmap(mmap: &Mmap) -> std::io::Result<()> {
+    mmap.lock()
+}
+
+/// See the Unix implementation above.
+#[cfg(not(unix))]
+pub(crate) fn lock_mmap(_mmap: &Mmap) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "mlock is not available on this platform",
+    ))
+}
+
+/// Release a [`lock_mmap`].
+#[cfg(unix)]
+pub(crate) fn unlock_mmap(mmap: &Mmap) -> std::io::Result<()> {
+    mmap.unlock()
+}
+
+/// See the Unix implementation above.
+#[cfg(not(unix))]
+pub(crate) fn unlock_mmap(_mmap: &Mmap) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "mlock is not available on this platform",
+    ))
+}
+
 /// Read-only memory-map of a file, treated as immutable for the map's lifetime.
 pub(crate) fn mmap_file(path: &Path) -> Result<Mmap> {
     let f = std::fs::File::open(path).map_err(|e| Error::io(path, e))?;

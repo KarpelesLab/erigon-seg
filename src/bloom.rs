@@ -17,7 +17,7 @@ use std::path::Path;
 use memmap2::Mmap;
 
 use crate::error::Result;
-use crate::util::{Advice, advise_mmap, mmap_file, preload_mmap};
+use crate::util::{Advice, advise_mmap, lock_mmap, mmap_file, preload_mmap, unlock_mmap};
 
 /// holiman/bloomfilter/v2 header magic: 8 zero bytes followed by `v02\n`.
 const BLOOM_MAGIC: [u8; 12] = [0, 0, 0, 0, 0, 0, 0, 0, b'v', b'0', b'2', b'\n'];
@@ -110,12 +110,12 @@ impl ExistenceFilter {
     /// Pin the whole `.kvei` in RAM with `mlock`. See
     /// [`KvReader::lock_index`](crate::KvReader::lock_index) for the caveats.
     pub fn lock(&self) -> std::io::Result<()> {
-        self.mmap.lock()
+        lock_mmap(&self.mmap)
     }
 
     /// Release an [`mlock`](ExistenceFilter::lock).
     pub fn unlock(&self) -> std::io::Result<()> {
-        self.mmap.unlock()
+        unlock_mmap(&self.mmap)
     }
 
     /// Which encoding this filter turned out to be.

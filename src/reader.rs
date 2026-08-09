@@ -261,6 +261,12 @@ impl KvReader {
     /// against `ulimit -l` first. A failure is safe to ignore — it just leaves the pages
     /// evictable — but note the limit applies per process across every locked mapping.
     ///
+    /// Unix only: elsewhere this reports [`ErrorKind::Unsupported`] rather than quietly
+    /// doing nothing, since the point of the call is a guarantee.
+    /// [`preload_index`](KvReader::preload_index) still works everywhere.
+    ///
+    /// [`ErrorKind::Unsupported`]: std::io::ErrorKind::Unsupported
+    ///
     /// Preloads first: `mlock` faults the pages in itself, but page-at-a-time, so
     /// warming them sequentially beforehand is markedly faster.
     pub fn lock_index(&self) -> std::io::Result<()> {
