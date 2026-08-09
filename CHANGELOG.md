@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.0.1...v1.1.0) - 2026-08-09
+
+### Added
+
+- add index preload and mlock for machines with RAM to spare
+
+### Fixed
+
+- gate mlock behind cfg(unix) so Windows builds
+
+### Other
+
+- narrow lookups with .bt di-nodes, single-pass decode, madvise hints
+
 ### Added
 
 - `BtreeIndex::nodes` and the `Nodes` type: the `.bt` di-node array (the key at every
