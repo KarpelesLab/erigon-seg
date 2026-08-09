@@ -140,6 +140,36 @@ impl KvStack {
         }
         Ok(())
     }
+
+    /// Total bytes [`preload_index`](KvStack::preload_index) would make resident across
+    /// the stack. A stack lookup consults every file, so this is the figure to budget.
+    pub fn index_bytes(&self) -> u64 {
+        self.readers.iter().map(|r| r.index_bytes()).sum()
+    }
+
+    /// Preload every file's index into the page cache. See
+    /// [`KvReader::preload_index`] — the case for it is stronger here, because a stack
+    /// lookup searches each file in turn until one hits.
+    pub fn preload_index(&self) -> u64 {
+        self.readers.iter().map(|r| r.preload_index()).sum()
+    }
+
+    /// Pin every file's index in RAM. See [`KvReader::lock_index`] for the
+    /// `RLIMIT_MEMLOCK` caveat, which applies to the stack's total.
+    pub fn lock_index(&self) -> std::io::Result<()> {
+        for r in &self.readers {
+            r.lock_index()?;
+        }
+        Ok(())
+    }
+
+    /// Release the pages pinned by [`lock_index`](KvStack::lock_index).
+    pub fn unlock_index(&self) -> std::io::Result<()> {
+        for r in &self.readers {
+            r.unlock_index()?;
+        }
+        Ok(())
+    }
 }
 
 /// Resolve the salt once (brute-forcing from the oldest file for [`Salt::Find`]) and

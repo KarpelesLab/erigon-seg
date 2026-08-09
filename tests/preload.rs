@@ -1,0 +1,146 @@
+//! Tests for the index preload / lock API.
+//!
+//! These only assert the parts that are deterministic: what counts as "the index", that
+//! preloading reports the right byte count, and that lookups are unaffected. Whether
+//! pages are actually resident afterwards is a kernel scheduling matter we cannot
+//! observe portably, and `mlock` depends on `RLIMIT_MEMLOCK`, so a failure there is
+//! tolerated rather than asserted.
+
+use std::path::{Path, PathBuf};
+
+use erigon_seg::{DomainOptions, DomainWriter, KvReader, Salt};
+
+fn scratch(tag: &str) -> PathBuf {
+    let p = std::env::temp_dir().join(format!("erigon_seg_preload_{}_{tag}", std::process::id()));
+    std::fs::create_dir_all(&p).unwrap();
+    p.join("v1.1-test.0-1.kv")
+}
+
+fn cleanup(kv: &Path) {
+    for ext in ["kv", "bt", "kvei"] {
+        let _ = std::fs::remove_file(kv.with_extension(ext));
+    }
+    if let Some(d) = kv.parent() {
+        let _ = std::fs::remove_dir(d);
+    }
+}
+
+/// Build a domain of `n` keys, with a `.kvei` when `salt` is set.
+fn build(tag: &str, n: u32, salt: Option<u32>) -> (PathBuf, Vec<Vec<u8>>) {
+    let kv = scratch(tag);
+    let keys: Vec<Vec<u8>> = (0..n)
+        .map(|i| {
+            let mut k = vec![0u8; 20];
+            k[..4].copy_from_slice(&i.to_be_bytes());
+            k
+        })
+        .collect();
+    let mut w = DomainWriter::create(
+        &kv,
+        DomainOptions {
+            bt: Default::default(),
+            salt,
+            compress: true,
+        },
+    )
+    .unwrap();
+    for k in &keys {
+        w.add(k, b"v").unwrap();
+    }
+    w.finish().unwrap();
+    (kv, keys)
+}
+
+#[test]
+fn preload_reports_index_size_and_preserves_lookups() {
+    let (kv, keys) = build("basic", 2000, None);
+    let r = KvReader::open(&kv).unwrap();
+
+    let bt_len = std::fs::metadata(kv.with_extension("bt")).unwrap().len();
+    assert_eq!(
+        r.index_bytes(),
+        bt_len,
+        "with no active bloom the index is just the .bt"
+    );
+    assert_eq!(r.preload_index(), bt_len, "preload reports bytes loaded");
+
+    // Preloading must not disturb results, and must be safe to repeat.
+    r.preload_index();
+    for k in keys.iter().step_by(13) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    assert_eq!(r.get(&[0xffu8; 20]).unwrap(), None);
+    cleanup(&kv);
+}
+
+#[test]
+fn kvei_counts_only_once_the_bloom_is_active() {
+    let salt = 1234u32;
+    let (kv, keys) = build("bloom", 2000, Some(salt));
+    let mut r = KvReader::open(&kv).unwrap();
+    let bt_len = std::fs::metadata(kv.with_extension("bt")).unwrap().len();
+    let kvei_len = std::fs::metadata(kv.with_extension("kvei")).unwrap().len();
+    assert!(kvei_len > 0, "a .kvei should have been written");
+
+    // Bloom not yet enabled: the .kvei is never read, so it is not worth preloading.
+    assert_eq!(r.index_bytes(), bt_len);
+    assert_eq!(r.preload_index(), bt_len);
+
+    assert!(r.enable_bloom(Salt::Known(salt)), "bloom should validate");
+    assert_eq!(r.index_bytes(), bt_len + kvei_len);
+    assert_eq!(r.preload_index(), bt_len + kvei_len);
+
+    // Lookups still correct with the bloom in play.
+    for k in keys.iter().step_by(13) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    for i in 0..200u32 {
+        let mut miss = vec![0u8; 20];
+        miss[..4].copy_from_slice(&i.to_be_bytes());
+        miss[19] = 0xff;
+        assert_eq!(r.get(&miss).unwrap(), None);
+    }
+    cleanup(&kv);
+}
+
+#[test]
+fn lock_and_unlock_round_trip() {
+    let (kv, keys) = build("lock", 1000, None);
+    let r = KvReader::open(&kv).unwrap();
+
+    // RLIMIT_MEMLOCK is commonly small, so a failure here is expected on some hosts and
+    // must simply leave the reader usable.
+    match r.lock_index() {
+        Ok(()) => {
+            for k in keys.iter().step_by(7) {
+                assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+            }
+            r.unlock_index().expect("unlock after a successful lock");
+        }
+        Err(e) => eprintln!("lock_index unavailable here ({e}); skipping the locked checks"),
+    }
+
+    // Either way, lookups keep working.
+    for k in keys.iter().step_by(7) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    cleanup(&kv);
+}
+
+#[test]
+fn advice_calls_are_harmless_in_any_order() {
+    let (kv, keys) = build("advice", 1500, None);
+    let r = KvReader::open(&kv).unwrap();
+
+    // preload_index restores random advice, so the two can be combined either way round.
+    r.advise_random().unwrap();
+    r.preload_index();
+    r.advise_sequential().unwrap();
+    r.preload_index();
+    r.advise_random().unwrap();
+
+    for k in keys.iter().step_by(11) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    cleanup(&kv);
+}

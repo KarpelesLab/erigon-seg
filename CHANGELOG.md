@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file much larger than RAM, `advise_random` cut measured read amplification for a point
   lookup from ~19 MiB to ~18 KiB; on a file that fits in the page cache it is a
   pessimisation, which is why it is not the default.
+- `KvReader::preload_index` / `lock_index` / `unlock_index` / `index_bytes`, and the same
+  on `KvStack`; `preload` / `lock` / `unlock` / `mapped_bytes` on `BtreeIndex` and
+  `ExistenceFilter`. A point lookup reads the `.bt` at every search comparison but
+  decompresses only the final block of keys, and the `.bt` is one to two orders of
+  magnitude smaller than the `.kv` — so on a machine with RAM to spare, holding just the
+  index resident removes nearly all remaining faults. On a 37 GiB file set with a 1.4 GiB
+  `.bt`, cold lookups went from ~400 µs to ~140 µs for a one-off 242 ms load.
+  `preload_index` covers the `.kvei` only when the bloom is active, since it is otherwise
+  never read; `lock_index` additionally pins the pages with `mlock`, subject to
+  `RLIMIT_MEMLOCK`.
 
 ### Changed
 

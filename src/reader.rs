@@ -211,6 +211,82 @@ impl KvReader {
         self.seg.advise_sequential()
     }
 
+    /// Bytes [`preload_index`](KvReader::preload_index) would make resident: the `.bt`,
+    /// plus the `.kvei` when the bloom is active. Use it to budget before calling.
+    pub fn index_bytes(&self) -> u64 {
+        let bt = self.index.as_ref().map_or(0, |i| i.mapped_bytes());
+        let kvei = match (&self.bloom, self.salt) {
+            (Some(b), Some(_)) => b.mapped_bytes(),
+            _ => 0,
+        };
+        bt + kvei
+    }
+
+    /// Read the index files into the page cache and return once they are resident,
+    /// reporting how many bytes were loaded.
+    ///
+    /// A point lookup touches the `.bt` far more than the `.kv` — every search
+    /// comparison reads the Elias-Fano offset array, while only the final block of keys
+    /// is decompressed — and the `.bt` is one to two orders of magnitude smaller. On a
+    /// machine with RAM to spare, holding the whole index resident removes nearly all
+    /// the remaining faults: on a 37 GiB file set with a 1.4 GiB `.bt`, cold lookups
+    /// went from ~440 µs to ~155 µs, for a one-off ~0.7 s load.
+    ///
+    /// The `.kvei` is included only when the bloom is active, since otherwise it is
+    /// never read. Loading is a hint to the kernel, not a reservation: these pages can
+    /// still be evicted under memory pressure — see [`lock_index`](KvReader::lock_index)
+    /// to prevent that.
+    pub fn preload_index(&self) -> u64 {
+        let mut n = 0;
+        if let Some(idx) = &self.index {
+            n += idx.preload();
+        }
+        if self.salt.is_some()
+            && let Some(bloom) = &self.bloom
+        {
+            n += bloom.preload();
+        }
+        n
+    }
+
+    /// Pin the index files in RAM with `mlock`, so the kernel cannot evict them.
+    ///
+    /// Stronger than [`preload_index`](KvReader::preload_index), and worth it when a
+    /// large `.kv` is streaming through the page cache and would otherwise push the
+    /// index back out. Same file selection: the `.bt`, plus the `.kvei` when the bloom
+    /// is active.
+    ///
+    /// Fails with `ENOMEM` (or `EPERM`) if the total exceeds `RLIMIT_MEMLOCK`, which is
+    /// commonly a few megabytes by default; check [`index_bytes`](KvReader::index_bytes)
+    /// against `ulimit -l` first. A failure is safe to ignore — it just leaves the pages
+    /// evictable — but note the limit applies per process across every locked mapping.
+    ///
+    /// Preloads first: `mlock` faults the pages in itself, but page-at-a-time, so
+    /// warming them sequentially beforehand is markedly faster.
+    pub fn lock_index(&self) -> std::io::Result<()> {
+        self.preload_index();
+        if let Some(idx) = &self.index {
+            idx.lock()?;
+        }
+        if self.salt.is_some()
+            && let Some(bloom) = &self.bloom
+        {
+            bloom.lock()?;
+        }
+        Ok(())
+    }
+
+    /// Release the pages pinned by [`lock_index`](KvReader::lock_index).
+    pub fn unlock_index(&self) -> std::io::Result<()> {
+        if let Some(idx) = &self.index {
+            idx.unlock()?;
+        }
+        if let Some(bloom) = &self.bloom {
+            bloom.unlock()?;
+        }
+        Ok(())
+    }
+
     /// Look up `key`, returning its value if present.
     ///
     /// Uses, in order: the bloom filter for a fast definite-absent answer (if enabled),
