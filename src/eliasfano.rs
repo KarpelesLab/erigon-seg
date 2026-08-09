@@ -6,6 +6,8 @@
 //! little-endian order. We only ever read, so this mirrors erigon-lib's `ReadEliasFano`
 //! / `Get`, including the `select`-table ("jump") fast path.
 
+use std::sync::Arc;
+
 use memmap2::Mmap;
 
 use crate::error::{Error, Result};
@@ -17,8 +19,30 @@ const EF_SUPERQ: u64 = 1 << 14; // 16384
 const EF_SUPERQ_SIZE: u64 = 1 + (EF_SUPERQ / EF_Q) / 2; // 33
 
 /// `bitutil.Select64`: index (0-based) of the `k`-th set bit in `x`.
+///
+/// On x86-64 with BMI2 this is a single `pdep` + `tzcnt`; elsewhere it falls back to
+/// clearing the lowest set bit `k` times. `get` calls this once per probe, so the
+/// difference is worth the runtime feature check (which `std` caches after the first
+/// call).
 #[inline]
-fn select64(mut x: u64, k: u32) -> u32 {
+fn select64(x: u64, k: u32) -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("bmi2") {
+            // SAFETY: guarded by the runtime BMI2 check immediately above. `_pdep_u64`
+            // has no memory or alignment preconditions.
+            #[allow(unsafe_code)]
+            unsafe {
+                return std::arch::x86_64::_pdep_u64(1u64 << k, x).trailing_zeros();
+            }
+        }
+    }
+    select64_fallback(x, k)
+}
+
+/// Portable `select64`: clear the lowest set bit `k` times, then count trailing zeros.
+#[inline]
+fn select64_fallback(mut x: u64, k: u32) -> u32 {
     for _ in 0..k {
         x &= x - 1; // clear lowest set bit
     }
@@ -30,7 +54,7 @@ fn select64(mut x: u64, k: u32) -> u32 {
 /// Owns the memory map of the file it lives in and indexes into it at a fixed `base`
 /// (0 for the legacy `.bt` layout, or the footer's `ef_offset` for the newer one).
 pub struct EliasFano {
-    mmap: Mmap,
+    mmap: Arc<Mmap>,
     base: usize,
     count: u64, // stored count == real_count - 1
     l: u64,
@@ -41,7 +65,7 @@ pub struct EliasFano {
 
 impl EliasFano {
     /// Parse the Elias-Fano header located at `base` within `mmap`.
-    pub(crate) fn open(mmap: Mmap, base: usize) -> Result<EliasFano> {
+    pub(crate) fn open(mmap: Arc<Mmap>, base: usize) -> Result<EliasFano> {
         if base + 16 > mmap.len() {
             return Err(Error::format("Elias-Fano: truncated header"));
         }

@@ -182,32 +182,71 @@ impl KvReader {
         (f != u64::MAX).then_some(f as u32)
     }
 
+    /// Advise the kernel that this file set is read by point lookup, so a page fault
+    /// should read one page instead of a read-ahead window.
+    ///
+    /// A binary search touches a handful of scattered pages, and the kernel's default
+    /// fault-around then reads far more than is used — on a file much larger than RAM
+    /// that read amplification dominates lookup latency. This is *not* the default,
+    /// because suppressing read-ahead is a regression for a file small enough to sit in
+    /// the page cache, where the surplus pages get used by later lookups anyway. Set it
+    /// when the data is large relative to RAM; leave it alone otherwise.
+    ///
+    /// Advice is a hint: errors are reported but ignoring them is safe, and on platforms
+    /// without `madvise` this does nothing.
+    pub fn advise_random(&self) -> std::io::Result<()> {
+        self.seg.advise_random()?;
+        if let Some(idx) = &self.index {
+            idx.advise_random()?;
+        }
+        if let Some(bloom) = &self.bloom {
+            bloom.advise_random()?;
+        }
+        Ok(())
+    }
+
+    /// Advise the kernel that this `.kv` is about to be read front to back — before an
+    /// [`iter`](KvReader::iter) or a merge — so read-ahead works in your favour.
+    pub fn advise_sequential(&self) -> std::io::Result<()> {
+        self.seg.advise_sequential()
+    }
+
     /// Look up `key`, returning its value if present.
     ///
     /// Uses, in order: the bloom filter for a fast definite-absent answer (if enabled),
     /// then the `.bt` index for an `O(log n)` binary search, or — if there is no index —
     /// an ordered linear scan.
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        Ok(self.get_hashed(key, None))
+    }
+
+    /// [`get`](KvReader::get) with the bloom hash supplied by the caller.
+    ///
+    /// `key_hash` must be `murmur3_x64_128_h1(key, salt)` for *this* reader's active
+    /// salt; pass `None` to compute it here. [`KvStack`](crate::KvStack) uses this to
+    /// hash a key once and reuse it across every file, since one salt covers the stack.
+    pub(crate) fn get_hashed(&self, key: &[u8], key_hash: Option<u64>) -> Option<Vec<u8>> {
         // Fast negative.
         if let Some(salt) = self.salt
             && let Some(bloom) = &self.bloom
-            && !bloom.contains_hash(murmur3_x64_128_h1(key, salt))
+            && !bloom.contains_hash(key_hash.unwrap_or_else(|| murmur3_x64_128_h1(key, salt)))
         {
-            return Ok(None);
+            return None;
         }
         match &self.index {
-            Some(idx) => Ok(self.get_indexed(idx, key)),
-            None => Ok(self.get_scan(key)),
+            Some(idx) => self.get_indexed(idx, key),
+            None => self.get_scan(key),
         }
     }
 
     fn get_indexed(&self, idx: &BtreeIndex, key: &[u8]) -> Option<Vec<u8>> {
-        let n = idx.key_count();
-        if n == 0 {
+        if idx.key_count() == 0 {
             return None;
         }
+        // The `.bt` di-nodes cut the search to the one M-key block that can hold `key`,
+        // using in-memory comparisons; without them this is the full range.
+        let (mut lo, mut hi) = idx.narrow(key);
         let mut g = self.seg.getter();
-        let (mut lo, mut hi) = (0u64, n);
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
             let off = idx.key_offset(mid)?;
@@ -231,11 +270,18 @@ impl KvReader {
         let mut g = self.seg.getter();
         while g.has_next() {
             let k = g.next();
-            let v = if g.has_next() { g.next() } else { Vec::new() };
             match k.as_slice().cmp(key) {
-                std::cmp::Ordering::Less => continue,
+                // Skipping the value avoids decompressing and allocating a word we are
+                // about to discard — half the words in the file, on a miss.
+                std::cmp::Ordering::Less => {
+                    if g.has_next() {
+                        g.skip();
+                    }
+                }
                 std::cmp::Ordering::Greater => return None, // keys are sorted
-                std::cmp::Ordering::Equal => return Some(v),
+                std::cmp::Ordering::Equal => {
+                    return Some(if g.has_next() { g.next() } else { Vec::new() });
+                }
             }
         }
         None

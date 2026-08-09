@@ -12,4 +12,10 @@ categories = ["encoding", "filesystem"]
 [dependencies]
 memmap2 = "0.9"
 
+# Plain `fn main()` benchmark: the built-in `#[bench]` harness is nightly-only, and the
+# interesting costs here are I/O- and cache-bound rather than sub-microsecond.
+[[bench]]
+name = "lookup"
+harness = false
+
 [dev-dependencies]

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `BtreeIndex::nodes` and the `Nodes` type: the `.bt` di-node array (the key at every
+  `M`-th position), which the reader previously ignored. Parsed on first use, so opening
+  a file only to scan it costs nothing.
+- `BtreeIndex::narrow`: the key-index range a lookup can be restricted to.
+- `KvReader::advise_random` / `KvReader::advise_sequential`, `KvStack::advise_random`,
+  and the same on `Seg` / `BtreeIndex` / `ExistenceFilter`. Opt-in `madvise` hints. On a
+  file much larger than RAM, `advise_random` cut measured read amplification for a point
+  lookup from ~19 MiB to ~18 KiB; on a file that fits in the page cache it is a
+  pessimisation, which is why it is not the default.
+
+### Changed
+
+- Point lookups now use the `.bt` di-nodes to narrow the binary search to one `M`-key
+  block before touching the `.kv`, turning `log2(n)` decompressing probes into
+  `log2(n/M)` in-memory comparisons plus `log2(M)` probes. Measured 2.2–7.6× faster
+  `get()` on real files (8 files, 68 K to 1.5 B keys), and up to ~30× cold when combined
+  with `advise_random`. Falls back to the full search for the legacy `.bt` layout.
+- `Getter::next` decodes the Huffman position stream once instead of twice, recording
+  pattern positions on the first pass rather than rewinding to recover them. Output is
+  byte-identical; sequential decoding is ~1.3–1.5× faster.
+- `EliasFano::get` uses a BMI2 `pdep` for `select64` on x86-64, falling back to the
+  previous loop elsewhere.
+- `KvStack::get` hashes the key once for the whole stack instead of once per file (one
+  salt covers the stack), and only reuses the hash for files whose bloom was enabled
+  with that salt.
+- `KvReader::get` on a file with no `.bt` now skips over values it is not returning
+  instead of decompressing and allocating them.
+
 ## [1.0.1](https://github.com/KarpelesLab/erigon-seg/compare/v1.0.0...v1.0.1) - 2026-06-30
 
 ### Added

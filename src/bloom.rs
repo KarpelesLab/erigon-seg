@@ -17,7 +17,7 @@ use std::path::Path;
 use memmap2::Mmap;
 
 use crate::error::Result;
-use crate::util::mmap_file;
+use crate::util::{Advice, advise_mmap, mmap_file};
 
 /// holiman/bloomfilter/v2 header magic: 8 zero bytes followed by `v02\n`.
 const BLOOM_MAGIC: [u8; 12] = [0, 0, 0, 0, 0, 0, 0, 0, b'v', b'0', b'2', b'\n'];
@@ -49,7 +49,6 @@ enum Inner {
 /// A `.kvei` existence filter.
 pub struct ExistenceFilter {
     // Held to keep the bit array mapped for the lifetime of `Inner::Bloom`.
-    #[allow(dead_code)]
     mmap: Mmap,
     inner: Inner,
 }
@@ -89,6 +88,12 @@ impl ExistenceFilter {
         // Not a (valid) bloom: a fuse filter or something we don't decode. Safe to
         // treat as match-all — it only ever disables the negative speedup.
         Inner::Unsupported
+    }
+
+    /// Advise the kernel that this `.kvei` is probed in random order. See
+    /// [`KvReader::advise_random`](crate::KvReader::advise_random).
+    pub fn advise_random(&self) -> std::io::Result<()> {
+        advise_mmap(&self.mmap, Advice::Random)
     }
 
     /// Which encoding this filter turned out to be.

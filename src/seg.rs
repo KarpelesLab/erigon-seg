@@ -22,7 +22,7 @@ use std::sync::Arc;
 use memmap2::Mmap;
 
 use crate::error::{Error, Result};
-use crate::util::mmap_file;
+use crate::util::{Advice, advise_mmap, mmap_file};
 use crate::varint::uvarint;
 
 const FORMAT_V1: u8 = 1;
@@ -395,6 +395,18 @@ impl Seg {
         self.page_values_count
     }
 
+    /// Advise the kernel that this `.kv` is read in random order (point lookups). See
+    /// [`KvReader::advise_random`](crate::KvReader::advise_random).
+    pub fn advise_random(&self) -> std::io::Result<()> {
+        advise_mmap(&self.mmap, Advice::Random)
+    }
+
+    /// Advise the kernel that this `.kv` is read front to back, so read-ahead helps.
+    /// Worth setting before an [`iter`](crate::KvReader::iter) or a merge.
+    pub fn advise_sequential(&self) -> std::io::Result<()> {
+        advise_mmap(&self.mmap, Advice::Sequential)
+    }
+
     /// Total mapped file length in bytes — a safe over-estimate of the maximum word
     /// offset, suitable as the `max_offset` bound when building a `.bt` index.
     pub fn len(&self) -> usize {
@@ -414,6 +426,7 @@ impl Seg {
             data: &self.mmap[self.words_start..],
             data_p: 0,
             data_bit: 0,
+            spans: Vec::new(),
         }
     }
 }
@@ -428,6 +441,11 @@ pub struct Getter<'a> {
     data: &'a [u8],
     data_p: u64,
     data_bit: i32,
+    /// Scratch reused across [`Getter::next`] calls: `(buf_pos, pattern_len)` for each
+    /// pattern laid down by the current word. Starts unallocated, so a getter that only
+    /// ever calls [`skip`](Getter::skip) — or decodes words that use no patterns — never
+    /// allocates.
+    spans: Vec<(usize, usize)>,
 }
 
 impl<'a> Getter<'a> {
@@ -567,9 +585,14 @@ impl<'a> Getter<'a> {
     /// Named `next` to mirror erigon; the cursor is deliberately not an `Iterator`,
     /// since a domain `.kv` interleaves key and value words that callers consume in
     /// pairs.
+    ///
+    /// Erigon decodes the Huffman position stream twice — once to lay down the patterns
+    /// and again, after rewinding, to find the gaps between them. The second walk exists
+    /// only to recover the pattern positions, so instead we record them the first time
+    /// through and replay them from `spans`; the literal pass becomes plain `memcpy`.
+    /// Output is byte-identical.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Vec<u8> {
-        let save_pos = self.data_p;
         let word_len = self.next_pos(true).wrapping_sub(1); // -1: 0 is the terminator
         if word_len == 0 {
             if self.data_bit > 0 {
@@ -581,7 +604,8 @@ impl<'a> Getter<'a> {
         let word_len = word_len as usize;
         let mut buf = vec![0u8; word_len];
 
-        // Pass 1: lay down the patterns.
+        // Single decode pass: lay down the patterns and record where each one landed.
+        self.spans.clear();
         let mut buf_pos: usize = 0;
         loop {
             let pos = self.next_pos(false);
@@ -590,6 +614,9 @@ impl<'a> Getter<'a> {
             }
             buf_pos += pos as usize - 1;
             let pt = self.next_pattern();
+            // The untruncated length is what the literal pass needs, even if the pattern
+            // overruns the buffer and the copy below is clipped.
+            self.spans.push((buf_pos, pt.len()));
             if buf_pos < buf.len() {
                 let n = pt.len().min(buf.len() - buf_pos);
                 buf[buf_pos..buf_pos + n].copy_from_slice(&pt[..n]);
@@ -599,28 +626,20 @@ impl<'a> Getter<'a> {
             self.data_p += 1;
             self.data_bit = 0;
         }
+        // The literals begin right after the bit stream we just consumed.
         let mut post_loop_pos = self.data_p;
-        self.data_p = save_pos;
-        self.data_bit = 0;
-        self.next_pos(true); // reset huffman reader to re-walk positions
 
-        // Pass 2: fill the gaps between patterns with literal bytes.
+        // Fill the gaps between patterns with literal bytes, replaying `spans`.
         let data = self.data;
-        buf_pos = 0;
         let mut last_uncovered: usize = 0;
-        loop {
-            let pos = self.next_pos(false);
-            if pos == 0 {
-                break;
-            }
-            buf_pos += pos as usize - 1;
-            if buf_pos > last_uncovered {
-                let dif = buf_pos - last_uncovered;
-                buf[last_uncovered..buf_pos]
+        for &(bp, plen) in &self.spans {
+            if bp > last_uncovered {
+                let dif = bp - last_uncovered;
+                buf[last_uncovered..bp]
                     .copy_from_slice(&data[post_loop_pos as usize..post_loop_pos as usize + dif]);
                 post_loop_pos += dif as u64;
             }
-            last_uncovered = buf_pos + self.next_pattern().len();
+            last_uncovered = bp + plen;
         }
         if word_len > last_uncovered {
             let dif = word_len - last_uncovered;

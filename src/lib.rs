@@ -6,7 +6,9 @@
 //! * **`.kv`** — the data: a `seg`-compressed stream of *words*. For a domain file the
 //!   words alternate `key`, `value`, `key`, `value`, … and the keys are sorted.
 //! * **`.bt`** — a B-tree index whose payload is an Elias-Fano array giving the `.kv`
-//!   byte offset of every key, enabling an `O(log n)` point lookup.
+//!   byte offset of every key, enabling an `O(log n)` point lookup. Its newer layout also
+//!   carries the key at every `M`-th position, which narrows a lookup to a single
+//!   `M`-key block before any decompression happens (see [`BtreeIndex::nodes`]).
 //! * **`.kvei`** — an existence (bloom) filter: a *negative* accelerator. If it says a
 //!   key is absent, the `.bt` search can be skipped entirely. It never reports a real
 //!   key as absent (no false negatives), so it is safe to trust for the negative case.
@@ -28,6 +30,9 @@
 //!
 //! // The .kvei bloom needs the index salt to be useful; resolve it once.
 //! r.enable_bloom(Salt::Find(8));
+//!
+//! // Only worth setting when the data is large relative to RAM — see the method docs.
+//! let _ = r.advise_random();
 //!
 //! // Point lookup (bloom-accelerated if enabled, else B-tree binary search).
 //! if let Some(value) = r.get(b"\x00\x01\x02")? {
@@ -72,7 +77,7 @@ mod varint;
 mod writer;
 
 pub use bloom::{ExistenceFilter, FilterKind};
-pub use btree::BtreeIndex;
+pub use btree::{BtreeIndex, Nodes};
 pub use eliasfano::EliasFano;
 pub use error::{Error, Result};
 pub use hash::murmur3_x64_128_h1;

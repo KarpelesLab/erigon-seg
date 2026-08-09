@@ -353,7 +353,7 @@ mod tests {
             offsets.len()
         ));
         std::fs::write(&path, &bytes).unwrap();
-        let ef = EliasFano::open(mmap_file(&path).unwrap(), 0).unwrap();
+        let ef = EliasFano::open(std::sync::Arc::new(mmap_file(&path).unwrap()), 0).unwrap();
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(ef.len(), offsets.len() as u64);

@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::hash::murmur3_x64_128_h1;
 use crate::reader::KvReader;
 use crate::salt::Salt;
 
@@ -118,12 +119,26 @@ impl KvStack {
     /// Look up `key` across all files, newest-first; returns the value from the newest
     /// file that contains it (overrides win), or `None` if no file has it.
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        // One salt covers the whole stack, so the bloom hash is the same for every file:
+        // compute it once instead of re-hashing the key per reader.
+        let key_hash = self.salt.map(|s| murmur3_x64_128_h1(key, s));
         for r in self.readers.iter().rev() {
-            if let Some(v) = r.get(key)? {
+            // Only reuse the hash for readers whose bloom was enabled with that salt.
+            let h = key_hash.filter(|_| r.salt() == self.salt);
+            if let Some(v) = r.get_hashed(key, h) {
                 return Ok(Some(v));
             }
         }
         Ok(None)
+    }
+
+    /// Advise the kernel that every file in the stack is read by point lookup. See
+    /// [`KvReader::advise_random`] for when this is worth setting.
+    pub fn advise_random(&self) -> std::io::Result<()> {
+        for r in &self.readers {
+            r.advise_random()?;
+        }
+        Ok(())
     }
 }
 
