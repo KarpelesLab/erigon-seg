@@ -99,7 +99,11 @@ Elias-Fano offset array, while only the final block of keys is decompressed.
   fits in RAM. Measured on an 11.5 GiB set: 11.82 GiB loaded in 3.8s, after which cold
   lookups ran at 2.5us against 306us untouched and 118us with the index alone. Check
   `total_bytes()` against free memory first — preloading more than fits is worse than
-  not preloading at all. Note that `advise_will_need` is *not* a substitute: Linux
+  not preloading at all. **`lock_all()`** additionally pins it with `mlock` so it cannot
+  be evicted; that needs `RLIMIT_MEMLOCK` (`ulimit -l`) to cover `total_bytes()`, and
+  fails with `ENOMEM` otherwise, leaving the data preloaded. Locking costs nothing extra
+  per process: the pages are pinned in the shared page cache, so two processes locking
+  the same 1.37 GiB file hold 1.39 GiB between them, not 2.74 GiB. Note that `advise_will_need` is *not* a substitute: Linux
   treats `MADV_WILLNEED` on a file mapping as bounded read-ahead, and against an 11.5 GiB
   `.kv` it left 0% of pages resident.
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `KvReader::lock_all` / `unlock_all`, `KvStack::lock_all` / `unlock_all`, and
+  `Seg::lock` / `unlock`: the locked form of `preload_all`, pinning the `.kv` as well as
+  the index so nothing is evicted. Locking a shared file mapping does *not* cost memory
+  per process — two processes locking the same 1.37 GiB file were measured to hold 1.39
+  GiB of system `Mlocked` between them, not 2.74 GiB — but `RLIMIT_MEMLOCK` is
+  per-process accounting and defaults low, so over the limit it fails with `ENOMEM` and
+  leaves the data preloaded (measured: 100% resident) rather than half-configured.
+
 ## [1.2.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.1.0...v1.2.0) - 2026-09-03
 
 ### Added

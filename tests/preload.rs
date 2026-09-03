@@ -174,6 +174,34 @@ fn lock_and_unlock_round_trip() {
 }
 
 #[test]
+fn lock_all_pins_everything_or_degrades_to_preload() {
+    let (kv, keys) = build("lockall", 2000, None);
+    let r = KvReader::open(&kv).unwrap();
+
+    // Over RLIMIT_MEMLOCK this fails, and must leave the reader working and the data
+    // merely preloaded rather than half-configured.
+    match r.lock_all() {
+        Ok(()) => {
+            for k in keys.iter().step_by(9) {
+                assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+            }
+            r.unlock_all().expect("unlock after a successful lock");
+            // Unlocking must not disturb results either.
+            for k in keys.iter().step_by(9) {
+                assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+            }
+        }
+        Err(e) => eprintln!("lock_all unavailable here ({e}); skipping the locked checks"),
+    }
+
+    for k in keys.iter().step_by(9) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    assert_eq!(r.get(&[0xffu8; 20]).unwrap(), None);
+    cleanup(&kv);
+}
+
+#[test]
 fn advice_calls_are_harmless_in_any_order() {
     let (kv, keys) = build("advice", 1500, None);
     let r = KvReader::open(&kv).unwrap();

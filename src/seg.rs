@@ -22,7 +22,7 @@ use std::sync::Arc;
 use memmap2::Mmap;
 
 use crate::error::{Error, Result};
-use crate::util::{Advice, advise_mmap, mmap_file, preload_mmap};
+use crate::util::{Advice, advise_mmap, lock_mmap, mmap_file, preload_mmap, unlock_mmap};
 use crate::varint::uvarint;
 
 const FORMAT_V1: u8 = 1;
@@ -422,6 +422,17 @@ impl Seg {
     /// [`KvReader::preload_all`](crate::KvReader::preload_all).
     pub fn preload(&self) -> u64 {
         preload_mmap(&self.mmap) as u64
+    }
+
+    /// Pin the whole `.kv` in RAM with `mlock`. See
+    /// [`KvReader::lock_all`](crate::KvReader::lock_all) for the caveats.
+    pub fn lock(&self) -> std::io::Result<()> {
+        lock_mmap(&self.mmap)
+    }
+
+    /// Release an [`mlock`](Seg::lock).
+    pub fn unlock(&self) -> std::io::Result<()> {
+        unlock_mmap(&self.mmap)
     }
 
     /// Total mapped file length in bytes — a safe over-estimate of the maximum word

@@ -185,6 +185,24 @@ impl KvStack {
         Ok(())
     }
 
+    /// Load and pin every file in the stack. See [`KvReader::lock_all`] — a whole stack
+    /// rarely fits under `RLIMIT_MEMLOCK`, so weigh [`total_bytes`](KvStack::total_bytes)
+    /// against `ulimit -l` first.
+    pub fn lock_all(&self) -> std::io::Result<()> {
+        for r in &self.readers {
+            r.lock_all()?;
+        }
+        Ok(())
+    }
+
+    /// Release the pages pinned by [`lock_all`](KvStack::lock_all).
+    pub fn unlock_all(&self) -> std::io::Result<()> {
+        for r in &self.readers {
+            r.unlock_all()?;
+        }
+        Ok(())
+    }
+
     /// Release the pages pinned by [`lock_index`](KvStack::lock_index).
     pub fn unlock_index(&self) -> std::io::Result<()> {
         for r in &self.readers {

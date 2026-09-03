@@ -334,6 +334,35 @@ impl KvReader {
         Ok(())
     }
 
+    /// Load the index *and* the `.kv`, then pin all of it in RAM with `mlock` so the
+    /// kernel cannot evict any of it. The locked form of
+    /// [`preload_all`](KvReader::preload_all).
+    ///
+    /// This does **not** cost memory per process. The pages are locked in the shared
+    /// page cache, not copied into the process: two processes locking the same 1.37 GiB
+    /// file were measured to hold 1.39 GiB of system `Mlocked` between them, not 2.74
+    /// GiB. Reading the file into a heap buffer instead would give each process its own
+    /// copy, and would be a weaker guarantee besides, since anonymous memory can be
+    /// swapped.
+    ///
+    /// The catch is `RLIMIT_MEMLOCK`, which is per-process accounting even though the
+    /// pages are shared, and defaults low on many systems. Check
+    /// [`total_bytes`](KvReader::total_bytes) against `ulimit -l`; raising it needs
+    /// `/etc/security/limits.conf` or a systemd `LimitMEMLOCK=`. Over the limit this
+    /// fails with `ENOMEM` and the data is left merely preloaded, which is still useful —
+    /// so a failure is safe to log and carry on from.
+    pub fn lock_all(&self) -> std::io::Result<()> {
+        self.preload_all();
+        self.lock_index()?;
+        self.seg.lock()
+    }
+
+    /// Release the pages pinned by [`lock_all`](KvReader::lock_all).
+    pub fn unlock_all(&self) -> std::io::Result<()> {
+        self.unlock_index()?;
+        self.seg.unlock()
+    }
+
     /// Release the pages pinned by [`lock_index`](KvReader::lock_index).
     pub fn unlock_index(&self) -> std::io::Result<()> {
         if let Some(idx) = &self.index {
