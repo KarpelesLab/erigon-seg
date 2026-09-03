@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `memlock_limit` and `raise_memlock_limit`, and the locking calls now raise the soft
+  `RLIMIT_MEMLOCK` to the hard limit automatically, once per process. A stock Linux box
+  ships a small soft limit under a large hard one, so `mlock` used to fail for a reason
+  the administrator never intended: with a 64 MiB soft limit and a 4 GiB hard limit,
+  locking a 1.37 GiB mapping directly fails with `ENOMEM` while `lock_all` now succeeds.
+  Raising the soft limit needs no privilege and cannot exceed configured policy. Raising
+  the *hard* limit needs `CAP_SYS_RESOURCE` and is only ever done through the explicit
+  `raise_memlock_limit`, never implicitly — escalating past a configured limit is the
+  application's decision, not a file reader's.
 - `KvReader::lock_all` / `unlock_all`, `KvStack::lock_all` / `unlock_all`, and
   `Seg::lock` / `unlock`: the locked form of `preload_all`, pinning the `.kv` as well as
   the index so nothing is evicted. Locking a shared file mapping does *not* cost memory

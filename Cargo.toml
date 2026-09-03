@@ -12,6 +12,11 @@ categories = ["encoding", "filesystem"]
 [dependencies]
 memmap2 = "0.9"
 
+# For RLIMIT_MEMLOCK only (mlock support); std does not expose getrlimit/setrlimit.
+# memmap2 already pulls this in on unix, so it costs nothing new.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Plain `fn main()` benchmark: the built-in `#[bench]` harness is nightly-only, and the
 # interesting costs here are I/O- and cache-bound rather than sub-microsecond.
 [[bench]]

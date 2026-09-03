@@ -85,6 +85,7 @@ pub use reader::{KvIter, KvReader};
 pub use salt::{Salt, salt_from_file};
 pub use seg::{Getter, OpenOptions, Seg};
 pub use stack::KvStack;
+pub use util::{memlock_limit, raise_memlock_limit};
 pub use writer::{
     BtLayout, BtOptions, DEFAULT_BTREE_M, DomainOptions, DomainPaths, DomainWriter, KveiBuilder,
     MergeOptions, SegWriter, build_bt, build_bt_from_seg, build_kvei, build_kvei_from_seg, merge,

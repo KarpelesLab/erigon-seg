@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use erigon_seg::{DomainOptions, DomainWriter, KvReader, Salt};
+use erigon_seg::{DomainOptions, DomainWriter, KvReader, Salt, memlock_limit, raise_memlock_limit};
 
 fn scratch(tag: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!("erigon_seg_preload_{}_{tag}", std::process::id()));
@@ -199,6 +199,34 @@ fn lock_all_pins_everything_or_degrades_to_preload() {
     }
     assert_eq!(r.get(&[0xffu8; 20]).unwrap(), None);
     cleanup(&kv);
+}
+
+#[test]
+fn memlock_limit_is_readable_and_raisable() {
+    let Some((soft, hard)) = memlock_limit() else {
+        eprintln!("no RLIMIT_MEMLOCK on this platform; skipping");
+        return;
+    };
+    assert!(soft <= hard, "soft limit must not exceed the hard limit");
+
+    // Raising to the hard limit needs no privilege and must never lower anything.
+    let (soft2, hard2) = raise_memlock_limit(u64::MAX).expect("raising should not error");
+    assert!(
+        soft2 >= soft,
+        "soft limit must not go down: {soft} -> {soft2}"
+    );
+    assert!(
+        hard2 >= hard,
+        "hard limit must not go down: {hard} -> {hard2}"
+    );
+    assert_eq!(
+        soft2, hard2,
+        "soft should have been raised to the hard limit"
+    );
+
+    // Idempotent.
+    let (soft3, hard3) = raise_memlock_limit(u64::MAX).unwrap();
+    assert_eq!((soft2, hard2), (soft3, hard3));
 }
 
 #[test]

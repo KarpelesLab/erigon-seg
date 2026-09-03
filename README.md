@@ -101,7 +101,10 @@ Elias-Fano offset array, while only the final block of keys is decompressed.
   `total_bytes()` against free memory first — preloading more than fits is worse than
   not preloading at all. **`lock_all()`** additionally pins it with `mlock` so it cannot
   be evicted; that needs `RLIMIT_MEMLOCK` (`ulimit -l`) to cover `total_bytes()`, and
-  fails with `ENOMEM` otherwise, leaving the data preloaded. Locking costs nothing extra
+  fails with `ENOMEM` otherwise, leaving the data preloaded. The soft limit is raised to
+  the hard limit automatically, which is what makes locking work on a stock box; lifting
+  the hard limit itself needs root and is left to `raise_memlock_limit()` so a library is
+  never silently escalating past configured policy. Locking costs nothing extra
   per process: the pages are pinned in the shared page cache, so two processes locking
   the same 1.37 GiB file hold 1.39 GiB between them, not 2.74 GiB. Note that `advise_will_need` is *not* a substitute: Linux
   treats `MADV_WILLNEED` on a file mapping as bounded read-ahead, and against an 11.5 GiB

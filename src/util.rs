@@ -68,6 +68,83 @@ pub(crate) fn preload_mmap(mmap: &Mmap) -> usize {
     len
 }
 
+/// The process's `RLIMIT_MEMLOCK` as `(soft, hard)` in bytes, or `None` off Unix.
+/// `u64::MAX` means unlimited.
+#[cfg(unix)]
+pub(crate) fn memlock_limit_raw() -> Option<(u64, u64)> {
+    let mut r = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `getrlimit` only writes through the provided pointer, which is a valid
+    // local. It cannot fail for a valid resource id.
+    #[allow(unsafe_code)]
+    let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut r) };
+    if rc != 0 {
+        return None;
+    }
+    // `rlim_t` happens to be `u64` on the platforms we build for, which makes these
+    // casts look redundant, but it is platform-defined — so convert explicitly rather
+    // than assume.
+    #[allow(clippy::unnecessary_cast)]
+    Some((r.rlim_cur as u64, r.rlim_max as u64))
+}
+
+/// See the Unix implementation above.
+#[cfg(not(unix))]
+pub(crate) fn memlock_limit_raw() -> Option<(u64, u64)> {
+    None
+}
+
+/// Set `RLIMIT_MEMLOCK` to `(soft, hard)`.
+#[cfg(unix)]
+pub(crate) fn set_memlock_limit_raw(soft: u64, hard: u64) -> std::io::Result<()> {
+    let r = libc::rlimit {
+        rlim_cur: soft as libc::rlim_t,
+        rlim_max: hard as libc::rlim_t,
+    };
+    // SAFETY: `setrlimit` reads through the provided pointer, which is a valid local.
+    #[allow(unsafe_code)]
+    let rc = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &r) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// See the Unix implementation above.
+#[cfg(not(unix))]
+pub(crate) fn set_memlock_limit_raw(_soft: u64, _hard: u64) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "RLIMIT_MEMLOCK is not available on this platform",
+    ))
+}
+
+/// Raise the soft `RLIMIT_MEMLOCK` to the hard limit, once per process.
+///
+/// This is what makes `mlock` usable on a stock Linux box, where the soft limit is
+/// commonly a few megabytes while the hard limit is unlimited: without it, locking fails
+/// for a reason the administrator never intended. Raising the soft limit toward the hard
+/// one needs no privilege and cannot exceed the configured policy — the hard limit *is*
+/// the policy — so it is safe to do implicitly. Raising the *hard* limit is a different
+/// matter and is never done automatically; see
+/// [`raise_memlock_limit`](crate::raise_memlock_limit).
+///
+/// Unix only: it is reached from `lock_mmap`, which does nothing elsewhere.
+#[cfg(unix)]
+pub(crate) fn raise_memlock_soft_once() {
+    static DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    DONE.get_or_init(|| {
+        if let Some((soft, hard)) = memlock_limit_raw()
+            && soft < hard
+        {
+            let _ = set_memlock_limit_raw(hard, hard);
+        }
+    });
+}
+
 /// Pin a mapping in RAM with `mlock`.
 ///
 /// Unlike [`advise_mmap`], the non-Unix path reports `Unsupported` rather than pretending
@@ -75,6 +152,7 @@ pub(crate) fn preload_mmap(mmap: &Mmap) -> usize {
 /// guarantee the caller may be relying on, so silently not doing it would be a lie.
 #[cfg(unix)]
 pub(crate) fn lock_mmap(mmap: &Mmap) -> std::io::Result<()> {
+    raise_memlock_soft_once();
     mmap.lock()
 }
 
@@ -111,4 +189,50 @@ pub(crate) fn mmap_file(path: &Path) -> Result<Mmap> {
     #[allow(unsafe_code)]
     let mmap = unsafe { Mmap::map(&f) }.map_err(|e| Error::io(path, e))?;
     Ok(mmap)
+}
+
+/// The process's `RLIMIT_MEMLOCK` as `(soft, hard)` in bytes, or `None` on a platform
+/// without it. [`u64::MAX`] means unlimited.
+///
+/// The soft limit is what `mlock` is actually checked against; the hard limit is the
+/// ceiling the soft one can be raised to without privilege. Compare against
+/// [`KvReader::total_bytes`](crate::KvReader::total_bytes) before
+/// [`lock_all`](crate::KvReader::lock_all).
+pub fn memlock_limit() -> Option<(u64, u64)> {
+    memlock_limit_raw()
+}
+
+/// Raise `RLIMIT_MEMLOCK` as far as this process is permitted to, returning the
+/// resulting `(soft, hard)`.
+///
+/// Two things can happen, and they need different privileges:
+///
+/// * The soft limit is raised to the hard limit. This needs no privilege and never
+///   exceeds the administrator's policy, so the locking calls already do it for you —
+///   calling this explicitly is only needed if you want the numbers back.
+/// * The hard limit is raised to `want` (use [`u64::MAX`] for unlimited). This requires
+///   `CAP_SYS_RESOURCE`, i.e. root, and is **not** attempted by anything else in this
+///   crate: escalating past a configured limit is a decision for the application, not a
+///   library reading files.
+///
+/// A failure to raise the hard limit is not reported as an error — the soft-limit raise
+/// is what usually matters, and you can see what you ended up with in the return value.
+/// Errors are reserved for not being able to read or set the limit at all.
+///
+/// This mutates process-wide state and affects every other user of the process.
+pub fn raise_memlock_limit(want: u64) -> std::io::Result<(u64, u64)> {
+    let (_, hard) = memlock_limit_raw().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "RLIMIT_MEMLOCK is not available on this platform",
+        )
+    })?;
+    // Always take the free part: soft up to hard.
+    set_memlock_limit_raw(hard, hard)?;
+    // Then try to lift the ceiling itself, which only root can do. Ignore the refusal.
+    if want > hard {
+        let _ = set_memlock_limit_raw(want, want);
+    }
+    memlock_limit_raw()
+        .ok_or_else(|| std::io::Error::other("RLIMIT_MEMLOCK became unreadable after being set"))
 }
