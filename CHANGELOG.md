@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.1.0...v1.2.0) - 2026-09-03
+
+### Added
+
+- add preload_all so the .kv can be brought into memory too
+
+### Fixed
+
+- keep docs and non-x86-64 clippy clean
+
+### Other
+
+- resolve BMI2 once per index, prefetch large node arenas
+
 ### Added
 
 - `KvReader::preload_all` / `KvStack::preload_all`, `KvReader::total_bytes` /
