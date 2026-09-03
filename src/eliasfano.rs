@@ -18,35 +18,28 @@ const EF_QMASK: u64 = EF_Q - 1;
 const EF_SUPERQ: u64 = 1 << 14; // 16384
 const EF_SUPERQ_SIZE: u64 = 1 + (EF_SUPERQ / EF_Q) / 2; // 33
 
-/// `bitutil.Select64`: index (0-based) of the `k`-th set bit in `x`.
-///
-/// On x86-64 with BMI2 this is a single `pdep` + `tzcnt`; elsewhere it falls back to
-/// clearing the lowest set bit `k` times. `get` calls this once per probe, so the
-/// difference is worth the runtime feature check (which `std` caches after the first
-/// call).
-#[inline]
-fn select64(x: u64, k: u32) -> u32 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::is_x86_feature_detected!("bmi2") {
-            // SAFETY: guarded by the runtime BMI2 check immediately above. `_pdep_u64`
-            // has no memory or alignment preconditions.
-            #[allow(unsafe_code)]
-            unsafe {
-                return std::arch::x86_64::_pdep_u64(1u64 << k, x).trailing_zeros();
-            }
-        }
-    }
-    select64_fallback(x, k)
-}
-
-/// Portable `select64`: clear the lowest set bit `k` times, then count trailing zeros.
+/// Portable `select64`: index (0-based) of the `k`-th set bit in `x`, by clearing the
+/// lowest set bit `k` times. Up to 63 iterations.
 #[inline]
 fn select64_fallback(mut x: u64, k: u32) -> u32 {
     for _ in 0..k {
         x &= x - 1; // clear lowest set bit
     }
     x.trailing_zeros()
+}
+
+/// `select64` as a single `pdep` + `tzcnt`.
+///
+/// # Safety
+/// The caller must have established that the CPU supports BMI2.
+#[cfg(target_arch = "x86_64")]
+#[allow(unsafe_code)]
+#[target_feature(enable = "bmi2")]
+#[inline]
+unsafe fn select64_bmi2(x: u64, k: u32) -> u32 {
+    // The intrinsic is safe to call here: its BMI2 requirement is carried by this
+    // function's `target_feature` and discharged by the caller.
+    std::arch::x86_64::_pdep_u64(1u64 << k, x).trailing_zeros()
 }
 
 /// A read-only view of an Elias-Fano monotone sequence.
@@ -61,6 +54,9 @@ pub struct EliasFano {
     lower_mask: u64,
     words_lower: usize,
     words_upper: usize,
+    /// Whether [`select64_bmi2`] may be called — resolved once here rather than on every
+    /// `get`, so the hot path carries no feature test.
+    bmi2: bool,
 }
 
 impl EliasFano {
@@ -88,6 +84,10 @@ impl EliasFano {
             lower_mask,
             words_lower,
             words_upper,
+            #[cfg(target_arch = "x86_64")]
+            bmi2: std::is_x86_feature_detected!("bmi2"),
+            #[cfg(not(target_arch = "x86_64"))]
+            bmi2: false,
         };
         // Bounds-check that at least the lower+upper bit regions fit; the trailing
         // jump (select) table is addressed only at valid indices by `get`.
@@ -136,7 +136,38 @@ impl EliasFano {
     /// `ef.Get(i)`: the `i`-th value of the monotone sequence (a `.kv` byte offset).
     ///
     /// Panics if `i >= self.len()`; callers must bound-check (point-lookup does).
+    ///
+    /// A point lookup calls this once per search comparison, so the BMI2 decision is
+    /// made here — one perfectly-predicted branch on a stored flag — rather than inside
+    /// `select64`. Testing the feature per call cost about 2.8x on `select64` itself and
+    /// blocked the surrounding function from being compiled as BMI2 code at all.
+    #[inline]
     pub fn get(&self, i: u64) -> u64 {
+        #[cfg(target_arch = "x86_64")]
+        if self.bmi2 {
+            // SAFETY: `self.bmi2` was set from a runtime BMI2 check at open time.
+            #[allow(unsafe_code)]
+            return unsafe { self.get_bmi2(i) };
+        }
+        self.get_impl(i, select64_fallback)
+    }
+
+    /// `get` compiled with BMI2 enabled throughout, so `pdep` inlines and the rest of
+    /// the body gets BMI2 codegen too.
+    ///
+    /// # Safety
+    /// The caller must have established that the CPU supports BMI2.
+    #[cfg(target_arch = "x86_64")]
+    #[allow(unsafe_code)]
+    #[target_feature(enable = "bmi2")]
+    unsafe fn get_bmi2(&self, i: u64) -> u64 {
+        // SAFETY: this function's `target_feature` guarantees BMI2 for `select64_bmi2`.
+        self.get_impl(i, |x, k| unsafe { select64_bmi2(x, k) })
+    }
+
+    /// The body of `get`, generic over how the final `select64` is performed.
+    #[inline(always)]
+    fn get_impl(&self, i: u64, select64: impl Fn(u64, u32) -> u32) -> u64 {
         // lower `l` bits live at bit position `i*l`
         let mut lower = 0u64;
         if self.l != 0 {
@@ -174,13 +205,47 @@ impl EliasFano {
 
 #[cfg(test)]
 mod tests {
-    use super::select64;
+    use super::select64_fallback;
 
     #[test]
     fn select64_matches_definition() {
-        assert_eq!(select64(0b1011, 0), 0);
-        assert_eq!(select64(0b1011, 1), 1);
-        assert_eq!(select64(0b1011, 2), 3);
-        assert_eq!(select64(1u64 << 63, 0), 63);
+        assert_eq!(select64_fallback(0b1011, 0), 0);
+        assert_eq!(select64_fallback(0b1011, 1), 1);
+        assert_eq!(select64_fallback(0b1011, 2), 3);
+        assert_eq!(select64_fallback(1u64 << 63, 0), 63);
+    }
+
+    /// The BMI2 path is only reachable on hardware that has it, so pin it against the
+    /// portable one over a wide spread of inputs rather than trusting them to match.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn select64_bmi2_matches_fallback() {
+        if !std::is_x86_feature_detected!("bmi2") {
+            eprintln!("no BMI2 here; skipping");
+            return;
+        }
+        let mut st = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..200_000 {
+            st ^= st >> 12;
+            st ^= st << 25;
+            st ^= st >> 27;
+            let x = st.wrapping_mul(0x2545_F491_4F6C_DD1D);
+            let pc = x.count_ones();
+            if pc == 0 {
+                continue;
+            }
+            for k in [0, pc / 2, pc - 1] {
+                // SAFETY: guarded by the BMI2 check above.
+                #[allow(unsafe_code)]
+                let got = unsafe { super::select64_bmi2(x, k) };
+                assert_eq!(got, select64_fallback(x, k), "x={x:#x} k={k}");
+            }
+        }
+        // Edge cases: single bit at each end, and all bits set.
+        for (x, k, want) in [(1u64, 0, 0), (1u64 << 63, 0, 63), (u64::MAX, 63, 63)] {
+            #[allow(unsafe_code)]
+            let got = unsafe { super::select64_bmi2(x, k) };
+            assert_eq!(got, want);
+        }
     }
 }

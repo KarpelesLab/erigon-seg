@@ -72,7 +72,19 @@ pub struct Nodes {
     count: usize,
     m: u64,
     key_count: u64,
+    /// Whether [`Nodes::narrow`] should issue explicit prefetches; see the constant.
+    prefetch: bool,
 }
+
+/// Arena size above which [`Nodes::narrow`] prefetches both candidate probes.
+///
+/// Purely empirical, and about cache residency rather than any property of the format.
+/// Measured on one machine: a 142 MiB arena gained 1.21x from prefetching, a 29 MiB one
+/// was unchanged, and a 1.2 MiB one lost 8% to the wasted prefetch instructions. Any
+/// threshold between those middle two behaves identically on that data; this sits in the
+/// gap. If the search ever looks slow on a machine with a very different cache, this is
+/// the knob.
+const PREFETCH_ARENA_BYTES: usize = 16 << 20;
 
 impl Nodes {
     /// Number of nodes (`ceil(key_count / M)`).
@@ -118,24 +130,71 @@ impl Nodes {
     /// Node `j` is key `j * M`, and keys are sorted, so if `node[j] <= key < node[j+1]`
     /// then `key`, if present, lies in `[j*M, (j+1)*M)`. Returns an empty range when
     /// `key` sorts before the very first key, which cannot be in the file at all.
+    ///
+    /// Prefetches both possible next probes when the arena is large enough to miss cache
+    /// (see [`PREFETCH_ARENA_BYTES`]); one of the two is always wasted, which is why it
+    /// is not done unconditionally.
+    ///
+    /// This is deliberately a *branchy* binary search. Rewriting it branchlessly with
+    /// `select_unpredictable` (a `cmov`) was measured as a 1.07-1.20x win while the node
+    /// arena fits in L2, but a 0.50-0.62x *loss* once it does not — 34 MiB and 142 MiB
+    /// arenas both regressed sharply. A mispredicted branch is recovered from in a few
+    /// cycles, whereas `cmov` makes each level's load address depend on the previous
+    /// comparison, serialising the search at full memory latency; the branchy form lets
+    /// the CPU speculate down one side and issue the next load early, which is worth far
+    /// more than the mispredictions cost. Large files are the ones that matter here, so
+    /// the branchy form stays.
     #[inline]
     pub fn narrow(&self, key: &[u8]) -> (u64, u64) {
-        // Index of the first node strictly greater than `key`.
+        // Decided once, not per level, so the loop body stays tight either way.
+        let lo = if self.prefetch {
+            self.upper_bound::<true>(key)
+        } else {
+            self.upper_bound::<false>(key)
+        };
+        if lo == 0 {
+            return (0, 0); // key < node[0] == first key in the file
+        }
+        let start = (lo as u64 - 1) * self.m;
+        (start, (start + self.m).min(self.key_count))
+    }
+
+    /// Number of nodes that are `<= key`, i.e. the index of the first node above it.
+    #[inline(always)]
+    fn upper_bound<const PREFETCH: bool>(&self, key: &[u8]) -> usize {
         let mut lo = 0usize;
         let mut hi = self.count;
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
+            if PREFETCH {
+                // The two nodes the next iteration could probe, whichever way this one goes.
+                self.prefetch_key(mid + 1 + (hi - mid - 1) / 2);
+                self.prefetch_key(lo + (mid - lo) / 2);
+            }
             if self.key(mid) <= key {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
-        if lo == 0 {
-            return (0, 0); // key < node[0] == first key in the file
+        lo
+    }
+
+    /// Hint the cache to fetch node `j`, if it exists. A no-op off x86-64.
+    #[inline(always)]
+    fn prefetch_key(&self, j: usize) {
+        #[cfg(target_arch = "x86_64")]
+        if j < self.count {
+            let p = self.key(j).as_ptr();
+            // SAFETY: `p` points into `arena`, since `j < self.count` and `key` returns a
+            // slice of it. `_mm_prefetch` only reads a cache line and cannot fault.
+            #[allow(unsafe_code)]
+            unsafe {
+                std::arch::x86_64::_mm_prefetch(p as *const i8, std::arch::x86_64::_MM_HINT_T0);
+            }
         }
-        let start = (lo as u64 - 1) * self.m;
-        (start, (start + self.m).min(self.key_count))
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = j;
     }
 }
 
@@ -331,6 +390,7 @@ fn parse_nodes(data: &[u8], key_count: u64, m: u64, ef_offset: usize) -> Option<
     } else {
         fixed_len = None;
     }
+    let prefetch = arena.len() >= PREFETCH_ARENA_BYTES;
     Some(Nodes {
         arena,
         ends,
@@ -338,5 +398,106 @@ fn parse_nodes(data: &[u8], key_count: u64, m: u64, ef_offset: usize) -> Option<
         count,
         m,
         key_count,
+        prefetch,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a `Nodes` directly, so both `upper_bound` specialisations can be exercised
+    /// without a file large enough to trip [`PREFETCH_ARENA_BYTES`] (which would need
+    /// hundreds of millions of keys).
+    fn nodes_of(keys: &[&[u8]], prefetch: bool) -> Nodes {
+        let mut arena = Vec::new();
+        let mut ends = Vec::new();
+        let uniform = keys.windows(2).all(|w| w[0].len() == w[1].len());
+        for k in keys {
+            arena.extend_from_slice(k);
+            ends.push(arena.len() as u32);
+        }
+        Nodes {
+            fixed_len: if uniform && !keys.is_empty() {
+                Some(keys[0].len() as u32)
+            } else {
+                None
+            },
+            ends: if uniform { Vec::new() } else { ends },
+            arena,
+            count: keys.len(),
+            m: 256,
+            key_count: keys.len() as u64 * 256,
+            prefetch,
+        }
+    }
+
+    /// The prefetching and non-prefetching searches must be indistinguishable: prefetch
+    /// is only a cache hint, never a change of result.
+    #[test]
+    fn prefetch_variant_matches_plain() {
+        // Uniform-length keys, plus a variable-length set, plus a 1-element edge case.
+        let uniform: Vec<[u8; 4]> = (0u32..500).map(|i| (i * 3).to_be_bytes()).collect();
+        let uniform_refs: Vec<&[u8]> = uniform.iter().map(|k| &k[..]).collect();
+
+        let variable: Vec<Vec<u8>> = (0u32..300)
+            .map(|i| {
+                let mut v = (i * 7).to_be_bytes().to_vec();
+                v.truncate(2 + (i % 3) as usize);
+                v.push(0xff);
+                v
+            })
+            .collect();
+        let mut variable = variable;
+        variable.sort();
+        variable.dedup();
+        let variable_refs: Vec<&[u8]> = variable.iter().map(|k| &k[..]).collect();
+
+        let single: Vec<&[u8]> = vec![b"mmmm"];
+
+        for set in [&uniform_refs, &variable_refs, &single] {
+            let plain = nodes_of(set, false);
+            let pref = nodes_of(set, true);
+            // Probe every stored key, plus the gaps either side of it, plus the extremes.
+            let mut probes: Vec<Vec<u8>> = Vec::new();
+            for k in set.iter() {
+                probes.push(k.to_vec());
+                let mut lo = k.to_vec();
+                let last = lo.len() - 1;
+                lo[last] = lo[last].wrapping_sub(1);
+                probes.push(lo);
+                let mut hi = k.to_vec();
+                hi.push(0);
+                probes.push(hi);
+            }
+            probes.push(Vec::new());
+            probes.push(vec![0u8]);
+            probes.push(vec![0xffu8; 8]);
+
+            for p in &probes {
+                assert_eq!(
+                    plain.upper_bound::<false>(p),
+                    pref.upper_bound::<true>(p),
+                    "upper_bound disagrees for {p:02x?}"
+                );
+                assert_eq!(
+                    plain.narrow(p),
+                    pref.narrow(p),
+                    "narrow disagrees for {p:02x?}"
+                );
+            }
+        }
+    }
+
+    /// The gate is derived from the arena, so a small index must not be prefetching.
+    #[test]
+    fn small_arenas_do_not_prefetch() {
+        let keys: Vec<[u8; 4]> = (0u32..10).map(|i| i.to_be_bytes()).collect();
+        let refs: Vec<&[u8]> = keys.iter().map(|k| &k[..]).collect();
+        let n = nodes_of(
+            &refs,
+            refs.iter().map(|k| k.len()).sum::<usize>() >= PREFETCH_ARENA_BYTES,
+        );
+        assert!(!n.prefetch, "a 40-byte arena must not opt into prefetching");
+    }
 }

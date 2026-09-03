@@ -74,6 +74,34 @@ merge(&["accounts.0-50.kv", "accounts.50-100.kv"], "accounts.0-100.kv", MergeOpt
 Lower-level building blocks are also public: `SegWriter` (raw words), `build_bt` /
 `BtLayout` / `BtOptions`, and `KveiBuilder` / `build_kvei_from_seg`.
 
+## Performance notes
+
+Point lookups are dominated by the `.bt` index: every search comparison reads the
+Elias-Fano offset array, while only the final block of keys is decompressed.
+
+* **`-C target-cpu=native`** is the single biggest build-level lever. `EliasFano::get`
+  was measured 1.4-1.5x faster with it, because the BMI2 `pdep` used by `select64` is
+  then unconditional rather than reached through a runtime feature check. The crate
+  already resolves that check once per index rather than per call, so this is a smaller
+  win than it used to be, but it is still worth setting for a binary you control:
+
+  ```sh
+  RUSTFLAGS="-C target-cpu=native" cargo build --release
+  ```
+
+* **[`KvReader::preload_index`]** reads the `.bt` (and the `.kvei`, when the bloom is
+  active) into the page cache, and **`lock_index`** pins it with `mlock`. On a 37 GiB
+  file set with a 1.4 GiB `.bt`, cold lookups went from ~400us to ~140us for a one-off
+  242ms load. Worth it whenever the index fits in spare RAM, which it usually does — an
+  index is one to two orders of magnitude smaller than its `.kv`.
+
+* **[`KvReader::advise_random`]** suppresses read-ahead. It is a large win for a file
+  much larger than RAM (measured read amplification per lookup dropping from ~19 MiB to
+  ~18 KiB) and a 2-3x *loss* for one that fits in the page cache, so it is opt-in.
+
+[`KvReader::preload_index`]: https://docs.rs/erigon-seg/latest/erigon_seg/struct.KvReader.html#method.preload_index
+[`KvReader::advise_random`]: https://docs.rs/erigon-seg/latest/erigon_seg/struct.KvReader.html#method.advise_random
+
 ## Supported layouts
 
 - **`.kv`**: `v0` (body at offset 0) and `v1` (`[version, feature-flags]`, optional

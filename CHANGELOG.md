@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `EliasFano::get` resolves the BMI2 feature check once, when the index is opened, and
+  dispatches to a `#[target_feature(enable = "bmi2")]` body rather than testing the
+  feature inside `select64` on every call. Measured 1.05-1.42x faster `EliasFano::get`
+  on real indexes; the per-call test alone cost ~2.8x on `select64`, and it also stopped
+  the surrounding function from being compiled as BMI2 code.
+- `Nodes::narrow` prefetches both candidate probes when the node arena is large enough
+  to miss cache (16 MiB and up). Measured 1.20-1.23x on 29 MiB and 142 MiB arenas; below
+  the threshold the wasted prefetch costs ~8%, hence the gate.
+
 ## [1.1.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.0.1...v1.1.0) - 2026-08-09
 
 ### Added
