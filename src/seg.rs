@@ -22,7 +22,7 @@ use std::sync::Arc;
 use memmap2::Mmap;
 
 use crate::error::{Error, Result};
-use crate::util::{Advice, advise_mmap, mmap_file};
+use crate::util::{Advice, advise_mmap, mmap_file, preload_mmap};
 use crate::varint::uvarint;
 
 const FORMAT_V1: u8 = 1;
@@ -405,6 +405,23 @@ impl Seg {
     /// Worth setting before an [`iter`](crate::KvReader::iter) or a merge.
     pub fn advise_sequential(&self) -> std::io::Result<()> {
         advise_mmap(&self.mmap, Advice::Sequential)
+    }
+
+    /// Ask the kernel to start pulling this `.kv` into the page cache. See
+    /// [`KvReader::advise_will_need`](crate::KvReader::advise_will_need).
+    pub fn advise_will_need(&self) -> std::io::Result<()> {
+        advise_mmap(&self.mmap, Advice::WillNeed)
+    }
+
+    /// Bytes this `.kv` occupies when fully resident.
+    pub fn mapped_bytes(&self) -> u64 {
+        self.mmap.len() as u64
+    }
+
+    /// Read the whole `.kv` into the page cache, returning once it is resident. See
+    /// [`KvReader::preload_all`](crate::KvReader::preload_all).
+    pub fn preload(&self) -> u64 {
+        preload_mmap(&self.mmap) as u64
     }
 
     /// Total mapped file length in bytes — a safe over-estimate of the maximum word

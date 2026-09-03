@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `KvReader::preload_all` / `KvStack::preload_all`, `KvReader::total_bytes` /
+  `KvStack::total_bytes`, and `Seg::preload` / `Seg::mapped_bytes`. `preload_index` only
+  ever covered the index; there was no way to bring the `.kv` itself into memory. On an
+  11.5 GiB file set, `preload_all` loaded 11.82 GiB in 3.8s and took cold lookups from
+  306us to 2.5us, against 118us for `preload_index` alone.
+- `advise_will_need` on `KvReader` / `KvStack` / `Seg` / `BtreeIndex` / `ExistenceFilter`.
+  Note that Linux implements `MADV_WILLNEED` on a file mapping as bounded, best-effort
+  read-ahead: against an 11.5 GiB `.kv` it left 0% of pages resident after five seconds,
+  so it is documented as a weak hint and `preload_all` is the way to actually load data.
+
 ### Changed
 
 - `EliasFano::get` resolves the BMI2 feature check once, when the index is opened, and

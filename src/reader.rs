@@ -211,6 +211,41 @@ impl KvReader {
         self.seg.advise_sequential()
     }
 
+    /// Ask the kernel to start pulling all three files into the page cache, and return
+    /// immediately.
+    ///
+    /// **This is a weak hint, and on a large file it does nothing measurable.** Linux
+    /// implements `MADV_WILLNEED` for a file mapping as a bounded, best-effort read-ahead
+    /// request, not an instruction to load the file: issuing it against an 11.5 GiB `.kv`
+    /// left 0% of the pages resident five seconds later, while reading the same file
+    /// explicitly reached 100% at over 5 GiB/s. Treat it as useful only for regions small
+    /// enough to fall inside the kernel's read-ahead window.
+    ///
+    /// If you actually want the data in memory, use
+    /// [`preload_all`](KvReader::preload_all) (or [`preload_index`](KvReader::preload_index)
+    /// for just the index), which reads the pages and returns once they are there. To
+    /// stop them being evicted afterwards, [`lock_index`](KvReader::lock_index). There is
+    /// no `madvise` that means "keep resident" — `WILLNEED` means "start loading" and
+    /// `mlock` is the only guarantee.
+    pub fn advise_will_need(&self) -> std::io::Result<()> {
+        self.seg.advise_will_need()?;
+        if let Some(idx) = &self.index {
+            idx.advise_will_need()?;
+        }
+        if let Some(bloom) = &self.bloom {
+            bloom.advise_will_need()?;
+        }
+        Ok(())
+    }
+
+    /// Bytes all three files occupy when fully resident — the figure to weigh against
+    /// free RAM before calling [`advise_will_need`](KvReader::advise_will_need).
+    pub fn total_bytes(&self) -> u64 {
+        self.seg.mapped_bytes()
+            + self.index.as_ref().map_or(0, |i| i.mapped_bytes())
+            + self.bloom.as_ref().map_or(0, |b| b.mapped_bytes())
+    }
+
     /// Bytes [`preload_index`](KvReader::preload_index) would make resident: the `.bt`,
     /// plus the `.kvei` when the bloom is active. Use it to budget before calling.
     pub fn index_bytes(&self) -> u64 {
@@ -247,6 +282,23 @@ impl KvReader {
             n += bloom.preload();
         }
         n
+    }
+
+    /// Read the index *and* the `.kv` into the page cache, returning the bytes loaded
+    /// once they are resident.
+    ///
+    /// This is what to call on a machine with RAM to spare, since
+    /// [`advise_will_need`](KvReader::advise_will_need) does not reliably load anything.
+    /// It reads at page-cache speed — measured above 5 GiB/s on NVMe, so roughly two
+    /// seconds for an 11 GiB file set — and the pages remain evictable afterwards.
+    ///
+    /// Weigh [`total_bytes`](KvReader::total_bytes) against free RAM first: preloading
+    /// more than fits simply evicts one part of the file to make room for another, and
+    /// leaves you worse off than [`advise_random`](KvReader::advise_random) alone. When
+    /// the data does not fit, prefer [`preload_index`](KvReader::preload_index), which is
+    /// one to two orders of magnitude smaller and takes nearly all the random reads.
+    pub fn preload_all(&self) -> u64 {
+        self.preload_index() + self.seg.preload()
     }
 
     /// Pin the index files in RAM with `mlock`, so the kernel cannot evict them.

@@ -324,6 +324,12 @@ impl BtreeIndex {
         advise_mmap(&self.mmap, Advice::Random)
     }
 
+    /// Ask the kernel to start pulling this `.bt` into the page cache, without waiting.
+    /// See [`KvReader::advise_will_need`](crate::KvReader::advise_will_need).
+    pub fn advise_will_need(&self) -> std::io::Result<()> {
+        advise_mmap(&self.mmap, Advice::WillNeed)
+    }
+
     /// Bytes this `.bt` occupies when fully resident — what
     /// [`preload`](BtreeIndex::preload) or [`lock`](BtreeIndex::lock) would cost.
     pub fn mapped_bytes(&self) -> u64 {

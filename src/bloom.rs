@@ -96,6 +96,12 @@ impl ExistenceFilter {
         advise_mmap(&self.mmap, Advice::Random)
     }
 
+    /// Ask the kernel to start pulling this `.kvei` into the page cache, without waiting.
+    /// See [`KvReader::advise_will_need`](crate::KvReader::advise_will_need).
+    pub fn advise_will_need(&self) -> std::io::Result<()> {
+        advise_mmap(&self.mmap, Advice::WillNeed)
+    }
+
     /// Bytes this `.kvei` occupies when fully resident.
     pub fn mapped_bytes(&self) -> u64 {
         self.mmap.len() as u64

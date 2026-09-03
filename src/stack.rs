@@ -141,6 +141,21 @@ impl KvStack {
         Ok(())
     }
 
+    /// Ask the kernel to start pulling every file in the stack into the page cache. See
+    /// [`KvReader::advise_will_need`] — weigh [`total_bytes`](KvStack::total_bytes)
+    /// against free RAM first, since a stack is usually far larger than one file.
+    pub fn advise_will_need(&self) -> std::io::Result<()> {
+        for r in &self.readers {
+            r.advise_will_need()?;
+        }
+        Ok(())
+    }
+
+    /// Bytes every file in the stack occupies when fully resident.
+    pub fn total_bytes(&self) -> u64 {
+        self.readers.iter().map(|r| r.total_bytes()).sum()
+    }
+
     /// Total bytes [`preload_index`](KvStack::preload_index) would make resident across
     /// the stack. A stack lookup consults every file, so this is the figure to budget.
     pub fn index_bytes(&self) -> u64 {
@@ -152,6 +167,13 @@ impl KvStack {
     /// lookup searches each file in turn until one hits.
     pub fn preload_index(&self) -> u64 {
         self.readers.iter().map(|r| r.preload_index()).sum()
+    }
+
+    /// Preload every file's index and `.kv`. See [`KvReader::preload_all`] — check
+    /// [`total_bytes`](KvStack::total_bytes) against free RAM first, since a whole stack
+    /// rarely fits.
+    pub fn preload_all(&self) -> u64 {
+        self.readers.iter().map(|r| r.preload_all()).sum()
     }
 
     /// Pin every file's index in RAM. See [`KvReader::lock_index`] for the

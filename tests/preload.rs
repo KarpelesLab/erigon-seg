@@ -104,6 +104,52 @@ fn kvei_counts_only_once_the_bloom_is_active() {
 }
 
 #[test]
+fn preload_all_covers_the_data_file_too() {
+    let (kv, keys) = build("all", 2000, None);
+    let r = KvReader::open(&kv).unwrap();
+
+    let kv_len = std::fs::metadata(&kv).unwrap().len();
+    let bt_len = std::fs::metadata(kv.with_extension("bt")).unwrap().len();
+    assert_eq!(
+        r.total_bytes(),
+        kv_len + bt_len,
+        "no .kvei was written here"
+    );
+    assert!(
+        r.total_bytes() > r.index_bytes(),
+        "total must include the .kv, which index_bytes does not"
+    );
+    assert_eq!(
+        r.preload_all(),
+        kv_len + bt_len,
+        "preload_all reports .kv + index"
+    );
+
+    // Repeatable, and lookups are unaffected.
+    r.preload_all();
+    for k in keys.iter().step_by(13) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    assert_eq!(r.get(&[0xffu8; 20]).unwrap(), None);
+    cleanup(&kv);
+}
+
+#[test]
+fn will_need_is_a_harmless_hint() {
+    let (kv, keys) = build("willneed", 1500, None);
+    let r = KvReader::open(&kv).unwrap();
+    // It may do nothing at all (see the method docs), but it must never fail or change
+    // results, in any order relative to the other advice calls.
+    r.advise_will_need().unwrap();
+    r.advise_random().unwrap();
+    r.advise_will_need().unwrap();
+    for k in keys.iter().step_by(11) {
+        assert_eq!(r.get(k).unwrap().as_deref(), Some(&b"v"[..]));
+    }
+    cleanup(&kv);
+}
+
+#[test]
 fn lock_and_unlock_round_trip() {
     let (kv, keys) = build("lock", 1000, None);
     let r = KvReader::open(&kv).unwrap();

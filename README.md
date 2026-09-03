@@ -95,11 +95,20 @@ Elias-Fano offset array, while only the final block of keys is decompressed.
   242ms load. Worth it whenever the index fits in spare RAM, which it usually does — an
   index is one to two orders of magnitude smaller than its `.kv`.
 
+* **[`KvReader::preload_all`]** additionally loads the `.kv`, for when the whole file set
+  fits in RAM. Measured on an 11.5 GiB set: 11.82 GiB loaded in 3.8s, after which cold
+  lookups ran at 2.5us against 306us untouched and 118us with the index alone. Check
+  `total_bytes()` against free memory first — preloading more than fits is worse than
+  not preloading at all. Note that `advise_will_need` is *not* a substitute: Linux
+  treats `MADV_WILLNEED` on a file mapping as bounded read-ahead, and against an 11.5 GiB
+  `.kv` it left 0% of pages resident.
+
 * **[`KvReader::advise_random`]** suppresses read-ahead. It is a large win for a file
   much larger than RAM (measured read amplification per lookup dropping from ~19 MiB to
   ~18 KiB) and a 2-3x *loss* for one that fits in the page cache, so it is opt-in.
 
 [`KvReader::preload_index`]: https://docs.rs/erigon-seg/latest/erigon_seg/struct.KvReader.html#method.preload_index
+[`KvReader::preload_all`]: https://docs.rs/erigon-seg/latest/erigon_seg/struct.KvReader.html#method.preload_all
 [`KvReader::advise_random`]: https://docs.rs/erigon-seg/latest/erigon_seg/struct.KvReader.html#method.advise_random
 
 ## Supported layouts
