@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.2.0...v1.3.0) - 2026-09-03
+
+### Added
+
+- raise the soft RLIMIT_MEMLOCK automatically when locking
+- add lock_all to pin the .kv in RAM alongside the index
+
 ### Added
 
 - `memlock_limit` and `raise_memlock_limit`, and the locking calls now raise the soft
