@@ -55,7 +55,9 @@ pub struct EliasFano {
     words_lower: usize,
     words_upper: usize,
     /// Whether [`select64_bmi2`] may be called — resolved once here rather than on every
-    /// `get`, so the hot path carries no feature test.
+    /// `get`, so the hot path carries no feature test. Only meaningful on x86-64; other
+    /// architectures always take the portable `select64`, so the field does not exist.
+    #[cfg(target_arch = "x86_64")]
     bmi2: bool,
 }
 
@@ -86,8 +88,6 @@ impl EliasFano {
             words_upper,
             #[cfg(target_arch = "x86_64")]
             bmi2: std::is_x86_feature_detected!("bmi2"),
-            #[cfg(not(target_arch = "x86_64"))]
-            bmi2: false,
         };
         // Bounds-check that at least the lower+upper bit regions fit; the trailing
         // jump (select) table is addressed only at valid indices by `get`.

@@ -132,7 +132,7 @@ impl Nodes {
     /// `key` sorts before the very first key, which cannot be in the file at all.
     ///
     /// Prefetches both possible next probes when the arena is large enough to miss cache
-    /// (see [`PREFETCH_ARENA_BYTES`]); one of the two is always wasted, which is why it
+    /// (see `PREFETCH_ARENA_BYTES`); one of the two is always wasted, which is why it
     /// is not done unconditionally.
     ///
     /// This is deliberately a *branchy* binary search. Rewriting it branchlessly with
@@ -413,7 +413,7 @@ mod tests {
     use super::*;
 
     /// Build a `Nodes` directly, so both `upper_bound` specialisations can be exercised
-    /// without a file large enough to trip [`PREFETCH_ARENA_BYTES`] (which would need
+    /// without a file large enough to trip `PREFETCH_ARENA_BYTES` (which would need
     /// hundreds of millions of keys).
     fn nodes_of(keys: &[&[u8]], prefetch: bool) -> Nodes {
         let mut arena = Vec::new();
