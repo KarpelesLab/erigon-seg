@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.3.0...v1.4.0) - 2026-09-09
+## [1.3.1](https://github.com/KarpelesLab/erigon-seg/compare/v1.3.0...v1.3.1) - 2026-09-09
 
 ### Added
 
