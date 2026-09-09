@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.3.0...v1.4.0) - 2026-09-09
+
+### Added
+
+- let the salt brute force try caller-supplied hints first
+
 ### Added
 
 - `KvReader::find_salt_with_hints` / `enable_bloom_with_hints` and
