@@ -19,7 +19,9 @@ pub enum Salt {
     /// Brute-force the salt by requiring a batch of real keys to all hit the bloom,
     /// using `usize` worker threads. The ~1% per-key false-positive rate makes a wrong
     /// salt passing every sampled key astronomically unlikely, so the first salt that
-    /// passes is the real one.
+    /// passes is the real one. The `*_with_hints` entry points (e.g.
+    /// [`KvReader::find_salt_with_hints`](crate::KvReader::find_salt_with_hints)) try
+    /// caller-supplied candidates before the exhaustive search.
     Find(usize),
 }
 

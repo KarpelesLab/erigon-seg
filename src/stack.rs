@@ -41,6 +41,17 @@ impl KvStack {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
+        KvStack::open_with_hints(paths, salt, &[])
+    }
+
+    /// [`open`](KvStack::open), but a [`Salt::Find`] tries `hints` first — see
+    /// [`KvReader::find_salt_with_hints`]. Typical hints are the salt another stack
+    /// resolved (one salt covers a whole datadir) or a `salt-state.txt` value.
+    pub fn open_with_hints<I, P>(paths: I, salt: Salt, hints: &[u32]) -> Result<KvStack>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
         let mut paths: Vec<PathBuf> = paths
             .into_iter()
             .map(|p| p.as_ref().to_path_buf())
@@ -53,7 +64,7 @@ impl KvStack {
         for p in &paths {
             readers.push(KvReader::open(p)?);
         }
-        let salt = resolve_and_enable(&mut readers, salt);
+        let salt = resolve_and_enable(&mut readers, salt, hints);
         Ok(KvStack { readers, salt })
     }
 
@@ -62,6 +73,17 @@ impl KvStack {
     /// from different domains in the same directory are not mixed. Errors if no matching
     /// `.kv` file is found.
     pub fn open_dir(dir: impl AsRef<Path>, name_filter: &str, salt: Salt) -> Result<KvStack> {
+        KvStack::open_dir_with_hints(dir, name_filter, salt, &[])
+    }
+
+    /// [`open_dir`](KvStack::open_dir), but a [`Salt::Find`] tries `hints` first — see
+    /// [`open_with_hints`](KvStack::open_with_hints).
+    pub fn open_dir_with_hints(
+        dir: impl AsRef<Path>,
+        name_filter: &str,
+        salt: Salt,
+        hints: &[u32],
+    ) -> Result<KvStack> {
         let dir = dir.as_ref();
         let mut kvs: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|e| Error::format(format!("read_dir {}: {e}", dir.display())))?
@@ -82,7 +104,7 @@ impl KvStack {
             )));
         }
         kvs.sort_by_key(|p| step_key(p));
-        KvStack::open(kvs, salt)
+        KvStack::open_with_hints(kvs, salt, hints)
     }
 
     /// The resolved bloom salt, if one was supplied or found.
@@ -212,13 +234,16 @@ impl KvStack {
     }
 }
 
-/// Resolve the salt once (brute-forcing from the oldest file for [`Salt::Find`]) and
-/// enable each file's bloom against it. Returns the resolved salt, if any.
-fn resolve_and_enable(readers: &mut [KvReader], salt: Salt) -> Option<u32> {
+/// Resolve the salt once (hints, then brute force from the oldest file, for
+/// [`Salt::Find`]) and enable each file's bloom against it. Returns the resolved salt,
+/// if any.
+fn resolve_and_enable(readers: &mut [KvReader], salt: Salt, hints: &[u32]) -> Option<u32> {
     let resolved = match salt {
         Salt::None => None,
         Salt::Known(s) => Some(s),
-        Salt::Find(threads) => readers.first().and_then(|r| r.find_salt(threads)),
+        Salt::Find(threads) => readers
+            .first()
+            .and_then(|r| r.find_salt_with_hints(threads, hints)),
     };
     if let Some(s) = resolved {
         for r in readers.iter_mut() {

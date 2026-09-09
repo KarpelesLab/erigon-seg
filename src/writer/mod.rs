@@ -155,6 +155,17 @@ mod tests {
 
         // find_salt should also recover our salt from the generated filter.
         assert_eq!(r.find_salt(8), Some(salt));
+        // A right hint short-circuits the search; wrong hints are never accepted and
+        // fall through to the brute force (which still finds the real salt).
+        assert_eq!(r.find_salt_with_hints(8, &[salt]), Some(salt));
+        assert_eq!(
+            r.find_salt_with_hints(8, &[1, 0xdead_beef, salt]),
+            Some(salt)
+        );
+        assert_eq!(r.find_salt_with_hints(8, &[1, 0xdead_beef]), Some(salt));
+        let mut r2 = KvReader::open(&kv).unwrap();
+        assert!(r2.enable_bloom_with_hints(Salt::Find(1), &[0xdead_beef, salt]));
+        assert_eq!(r2.salt(), Some(salt));
 
         for p in [&kv, &bt, &kvei] {
             let _ = std::fs::remove_file(p);

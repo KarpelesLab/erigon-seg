@@ -113,6 +113,13 @@ impl KvReader {
     /// self-validates against real keys (so a wrong salt can never cause a missed key —
     /// it just leaves lookups unaccelerated).
     pub fn enable_bloom(&mut self, salt: Salt) -> bool {
+        self.enable_bloom_with_hints(salt, &[])
+    }
+
+    /// [`enable_bloom`](KvReader::enable_bloom), but a [`Salt::Find`] tries `hints` first
+    /// (see [`find_salt_with_hints`](KvReader::find_salt_with_hints)). `hints` is ignored
+    /// for [`Salt::Known`] and [`Salt::None`].
+    pub fn enable_bloom_with_hints(&mut self, salt: Salt, hints: &[u32]) -> bool {
         let Some(bloom) = &self.bloom else {
             return false;
         };
@@ -122,7 +129,7 @@ impl KvReader {
         let resolved = match salt {
             Salt::None => return false,
             Salt::Known(s) => s,
-            Salt::Find(threads) => match self.find_salt(threads) {
+            Salt::Find(threads) => match self.find_salt_with_hints(threads, hints) {
                 Some(s) => s,
                 None => return false,
             },
@@ -144,6 +151,19 @@ impl KvReader {
     /// filter, using `threads` workers. Returns `None` if no `.kvei` bloom is usable or
     /// no salt validates (e.g. a fuse-filter or format mismatch).
     pub fn find_salt(&self, threads: usize) -> Option<u32> {
+        self.find_salt_with_hints(threads, &[])
+    }
+
+    /// [`find_salt`](KvReader::find_salt), but try `hints` first, in order, and return
+    /// the first one that validates against the sampled keys before falling back to the
+    /// full brute force. A hint is checked exactly like a brute-force candidate, so a
+    /// wrong hint costs a few hashes and is never accepted.
+    ///
+    /// Erigon uses one salt per datadir, so good hints are the salts of sibling files
+    /// (other domains, other step ranges, a previous run), or the contents of
+    /// `salt-state.txt` / `salt-blocks.txt` from a datadir the files might have come
+    /// from. A right hint turns a search that averages 2³¹ candidates into a single check.
+    pub fn find_salt_with_hints(&self, threads: usize, hints: &[u32]) -> Option<u32> {
         let bloom = self.bloom.as_ref()?;
         if !bloom.is_accelerating() {
             return None;
@@ -152,21 +172,26 @@ impl KvReader {
         if samples.is_empty() {
             return None;
         }
+        let passes = |salt: u32| {
+            samples
+                .iter()
+                .all(|k| bloom.contains_hash(murmur3_x64_128_h1(k, salt)))
+        };
+        if let Some(&hint) = hints.iter().find(|&&h| passes(h)) {
+            return Some(hint);
+        }
         let threads = threads.clamp(1, 256) as u32;
         let found = AtomicU64::new(u64::MAX);
         std::thread::scope(|sc| {
             for t in 0..threads {
-                let (found, bloom, samples) = (&found, bloom, &samples);
+                let (found, passes) = (&found, &passes);
                 sc.spawn(move || {
                     let mut salt = t;
                     loop {
                         if found.load(Ordering::Relaxed) != u64::MAX {
                             return;
                         }
-                        if samples
-                            .iter()
-                            .all(|k| bloom.contains_hash(murmur3_x64_128_h1(k, salt)))
-                        {
+                        if passes(salt) {
                             found.fetch_min(salt as u64, Ordering::Relaxed);
                             return;
                         }

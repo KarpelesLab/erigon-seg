@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `KvReader::find_salt_with_hints` / `enable_bloom_with_hints` and
+  `KvStack::open_with_hints` / `open_dir_with_hints`: a `Salt::Find` now tries
+  caller-supplied candidate salts first and only falls back to the exhaustive search if
+  none validates. Erigon uses one salt per datadir, so the salt resolved for one stack
+  (or read from `salt-state.txt`) is the right hint for every other file from the same
+  datadir, turning a search that averages 2³¹ candidates into a single check. A hint is
+  validated exactly like a brute-force candidate, so a wrong hint is never accepted.
+
 ## [1.3.0](https://github.com/KarpelesLab/erigon-seg/compare/v1.2.0...v1.3.0) - 2026-09-03
 
 ### Added

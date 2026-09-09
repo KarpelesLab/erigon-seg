@@ -39,6 +39,8 @@ let mut r = KvReader::open("v1.1-accounts.0-1024.kv")?;
 
 // Optional: enable the .kvei bloom for fast definite-absent answers.
 r.enable_bloom(Salt::Find(8)); // or Salt::Known(salt)
+// One salt covers a whole datadir, so a salt found once can seed later searches:
+// r.enable_bloom_with_hints(Salt::Find(8), &[previous_salt]);
 
 if let Some(value) = r.get(b"\x00\x01\x02")? {
     println!("{} bytes", value.len());
